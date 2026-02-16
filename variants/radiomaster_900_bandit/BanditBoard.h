@@ -55,8 +55,11 @@ extern Adafruit_NeoPixel pixels;
   This unit has a FAN built-in.
   FAN is active at 250mW on it's ExpressLRS Firmware.
   Always ON
+
+  Settings are defined in platformio.ini
 */
-#define PA_FAN_EN        2 // FAN on GPIO 2
+// #define PA_FAN_EN        2 // FAN on GPIO 2
+// #define PA_FAN_TACHO     27
 
 /*
   This module has Skyworks SKY66122 controlled by dacWrite

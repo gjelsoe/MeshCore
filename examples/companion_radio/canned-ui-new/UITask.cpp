@@ -8,6 +8,12 @@
 #include <WiFi.h>
 #endif
 
+#ifdef USE_FAN_PWM
+#include "../../variants/radiomaster_900_bandit/FanController.h"
+#include "../../variants/radiomaster_900_bandit/FanSpeedScreen.h"
+extern FanController fan;
+#endif
+
 #ifdef USE_CANNED_MESSAGE
 #include "CannedMessagesScreen.h"
 static uint8_t canned_msg_buffer[120]; // 108 bytes + padding
@@ -118,6 +124,9 @@ class HomeScreen : public UIScreen {
 #endif
 #ifdef USE_CANNED_MESSAGE
     CANNED, // Canned Messages
+#endif
+#ifdef USE_FAN_PWM
+    FAN_SPEED,
 #endif
     SHUTDOWN,
     Count // keep as last
@@ -435,6 +444,22 @@ public:
       display.setTextSize(1);
       display.drawTextCentered(display.width() / 2, 48, PRESS_LABEL);
 #endif
+#ifdef USE_FAN_PWM
+    } else if (_page == HomePage::FAN_SPEED) { // ADD THIS SECTION
+      display.setColor(DisplayDriver::GREEN);
+      display.setTextSize(2);
+
+      char tmp[40];
+      sprintf(tmp, "Fan: %d%%", fan.getSpeed());
+      display.drawTextCentered(display.width() / 2, 20, tmp);
+
+      uint16_t rpm = fan.getRPM();
+      display.setTextSize(1);
+      display.setColor(DisplayDriver::LIGHT);
+      sprintf(tmp, "RPM: %d", rpm);
+      display.drawTextCentered(display.width() / 2, 39, tmp);
+      display.drawTextCentered(display.width() / 2, 54, PRESS_LABEL);
+#endif
     } else if (_page == HomePage::SHUTDOWN) {
       display.setColor(DisplayDriver::GREEN);
       display.setTextSize(1);
@@ -493,6 +518,11 @@ public:
 #ifdef USE_CANNED_MESSAGE
     if (c == KEY_ENTER && _page == HomePage::CANNED) {
       _task->gotoCannedMessagesScreen();
+    }
+#endif
+#ifdef USE_FAN_PWM
+    if (_page == HomePage::FAN_SPEED && c == KEY_ENTER) { // ADD THIS
+      _task->gotoFanSpeedScreen();
     }
 #endif
     if (c == KEY_ENTER && _page == HomePage::SHUTDOWN) {
@@ -645,6 +675,9 @@ void UITask::begin(DisplayDriver *display, SensorManager *sensors, NodePrefs *no
 #ifdef USE_CANNED_MESSAGE
   canned_messages = new CannedMessagesScreen(this);
 #endif
+#ifdef USE_FAN_PWM
+  fan_speed = new FanSpeedScreen(&fan, home, this);
+#endif
   setCurrScreen(splash);
 }
 
@@ -691,9 +724,11 @@ void UITask::msgRead(int msgcount) {
 
 void UITask::newMsg(uint8_t path_len, const char *from_name, const char *text, int msgcount) {
   _msgcount = msgcount;
+  notification_acknowledged = false;
 
   ((MsgPreviewScreen *)msg_preview)->addPreview(path_len, from_name, text);
   setCurrScreen(msg_preview);
+  notification_acknowledged = false;
 
   if (_display != NULL) {
     if (!_display->isOn() && !hasConnection()) {
@@ -731,7 +766,7 @@ void UITask::userLedHandler() {
 void UITask::neopixelMsgHandler() {
   unsigned long cur_time = millis();
 
-  if (_msgcount > 0) {
+  if (_msgcount > 0 && !notification_acknowledged) {
     // We have unread messages - do breathing effect
     if (cur_time >= next_neopixel_change) {
       // Update brightness
@@ -831,6 +866,9 @@ bool UITask::isButtonPressed() const {
 
 void UITask::loop() {
   char c = 0;
+#ifdef USE_FAN_PWM
+  fan.update();
+#endif
 #if UI_HAS_JOYSTICK
   int ev = user_btn.check();
   if (ev == BUTTON_EVENT_CLICK) {
@@ -1013,6 +1051,7 @@ char UITask::checkDisplayOn(char c) {
     _auto_off = millis() + AUTO_OFF_MILLIS; // extend auto-off timer
     _next_refresh = 0;                      // trigger refresh
   }
+  notification_acknowledged = true;
   return c;
 }
 

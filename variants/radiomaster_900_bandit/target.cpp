@@ -22,6 +22,10 @@ SensorManager sensors;
 #define PIN_USER_BTN (-1)
 #endif
 
+#ifdef USE_FAN_PWM
+FanController fan;
+#endif
+
 #ifdef DISPLAY_CLASS
 DISPLAY_CLASS display;
 // MomentaryButton user_btn(PIN_USER_BTN, 1000, true);
@@ -38,8 +42,13 @@ AnalogJoystick analog_joystick(PIN_USER_JOYSTICK, joystick_mappings, 6, KEY_SELE
 bool radio_init() {
 
 #ifdef PA_FAN_EN
+#ifdef USE_FAN_PWM
+  fan.begin();
+  fan.enable(true);
+#else
   pinMode(PA_FAN_EN, OUTPUT);
   digitalWrite(PA_FAN_EN, 1);
+#endif
 #endif
 
   fallback_clock.begin();

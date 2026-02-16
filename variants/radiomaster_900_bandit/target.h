@@ -13,6 +13,11 @@
 #include <helpers/ui/SH1115Display.h>
 #endif
 
+#ifdef USE_FAN_PWM
+#include "FanController.h"
+extern FanController fan;
+#endif
+
 extern BanditBoard board;
 
 extern WRAPPER_CLASS radio_driver;

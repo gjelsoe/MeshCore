@@ -54,8 +54,9 @@ class UITask : public AbstractUITask {
   int last_led_increment = 0;
 #endif
 
-#ifdef RADIOMASTER_900_BANDIT
-  // NeoPixel message notification support
+bool notification_acknowledged = false; // User acked new MSG
+
+#ifdef RADIOMASTER_900_BANDIT    // NeoPixel message notification support
   int neopixel_state = 0;
   unsigned long next_neopixel_change = 0;
   uint8_t neopixel_brightness = 0;
@@ -73,7 +74,9 @@ class UITask : public AbstractUITask {
 #ifdef USE_CANNED_MESSAGE
   UIScreen *canned_messages;
 #endif
-
+#ifdef USE_FAN_PWM
+  UIScreen *fan_speed; // Fan speed configuration screen
+#endif
   void userLedHandler();
 #ifdef RADIOMASTER_900_BANDIT
   void neopixelMsgHandler();
@@ -99,6 +102,9 @@ public:
   void gotoHomeScreen() { setCurrScreen(home); }
 #ifdef USE_CANNED_MESSAGE
   void gotoCannedMessagesScreen();
+#endif
+#ifdef USE_FAN_PWM
+  void gotoFanSpeedScreen() { setCurrScreen(fan_speed); }
 #endif
   void showAlert(const char *text, int duration_millis);
   int getMsgCount() const { return _msgcount; }
