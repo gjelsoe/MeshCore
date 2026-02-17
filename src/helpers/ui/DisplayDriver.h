@@ -425,7 +425,6 @@ public:
 
 #else
       // OLD: Simple block character replacement (original behavior)
-      unsigned char c = (unsigned char)src[i];
       if (c >= 32 && c <= 126) {
         dest[j++] = c; // ASCII printable
       } else if (c >= 0x80) {
