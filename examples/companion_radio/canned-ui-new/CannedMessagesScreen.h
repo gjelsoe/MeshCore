@@ -33,6 +33,13 @@ private:
   bool in_channel_selection;
   bool confirm_send;
 
+#ifdef PIN_USER_BTN
+  int confirm_option; // 0=Send, 1=Cancel, 2=Back (only used for single button)
+  int getValidChannelCount();
+  int getTotalItems();
+  bool isOnBackOption();
+#endif
+
   void countMessages();
   bool isValidChannel(int idx);
   void nextChannel(bool forward);

@@ -822,6 +822,7 @@ void UITask::setCurrScreen(UIScreen *c) {
 #ifdef USE_CANNED_MESSAGE
 void UITask::gotoCannedMessagesScreen() {
   if (canned_messages != NULL) {
+    ((CannedMessagesScreen *)canned_messages)->reset();
     setCurrScreen(canned_messages);
   }
 }
