@@ -12,6 +12,11 @@
 class CannedMessagesScreen;
 #endif
 
+#ifdef USE_ENCODER
+#include <helpers/ui/RotaryEncoderISR.h>
+extern RotaryEncoderISR rotary_encoder;
+#endif
+
 #ifndef LED_STATE_ON
 #define LED_STATE_ON 1
 #endif

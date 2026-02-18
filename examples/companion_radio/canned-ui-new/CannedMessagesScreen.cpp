@@ -20,7 +20,7 @@ static constexpr const char *DEFAULT_MESSAGES[] = { CANNED_MESSAGES, nullptr };
 CannedMessagesScreen::CannedMessagesScreen(UITask *task)
     : UIScreen(), _task(task), message_count(0), selected_channel(0), selected_message(0), scroll_offset(0),
       in_channel_selection(true), confirm_send(false)
-#ifdef PIN_USER_BTN
+#if defined(PIN_USER_BTN) || defined(USE_ENCODER)
       ,
       confirm_option(0)
 #endif
@@ -66,7 +66,7 @@ void CannedMessagesScreen::reset() {
   selected_message = 0;
   scroll_offset = 0;
   confirm_send = false;
-#ifdef PIN_USER_BTN
+#if defined(PIN_USER_BTN) || defined(USE_ENCODER)
   confirm_option = 0;
   // Reset channel to first valid one
   selected_channel = 0;
@@ -137,9 +137,9 @@ const char *CannedMessagesScreen::getChannelName(int idx) {
   return "Unknown";
 }
 
-#ifdef PIN_USER_BTN
+#if defined(PIN_USER_BTN) || defined(USE_ENCODER)
 // ------------------------------------------------------------
-// Single button navigation helpers
+// Single button / Encoder navigation helpers
 // ------------------------------------------------------------
 int CannedMessagesScreen::getValidChannelCount() {
 #ifndef MAX_GROUP_CHANNELS
@@ -216,7 +216,7 @@ void CannedMessagesScreen::renderChannelSelection(DisplayDriver &display) {
   display.setColor(DisplayDriver::BLUE);
   display.drawTextCentered(display.width() / 2, 54, "\x1B=Exit \x18/\x19 ENTER=OK");
 
-#elif defined(PIN_USER_BTN)
+#elif defined(PIN_USER_BTN) || defined(USE_ENCODER)
   int idx = 0;
 
   while (shown < 4 && idx < MAX_GROUP_CHANNELS) {
@@ -239,7 +239,11 @@ void CannedMessagesScreen::renderChannelSelection(DisplayDriver &display) {
   display.drawTextLeftAlign(5, y, "\x1B Back to Home");
 
   display.setColor(DisplayDriver::BLUE);
+#ifdef USE_ENCODER
+  display.drawTextCentered(display.width() / 2, 54, "Rotate Long=OK");
+#else
   display.drawTextCentered(display.width() / 2, 54, "Click=Next Long=OK");
+#endif
 #endif
 }
 
@@ -269,7 +273,7 @@ void CannedMessagesScreen::renderMessageSelection(DisplayDriver &display) {
   display.setColor(DisplayDriver::BLUE);
   display.drawTextCentered(display.width() / 2, 54, "\x1B=Back \x18/\x19 ENTER=OK");
 
-#elif defined(PIN_USER_BTN)
+#elif defined(PIN_USER_BTN) || defined(USE_ENCODER)
   // Back option is a virtual item at index message_count
   // Treat it as part of the list so it scrolls into view naturally
   int total_items = message_count + 1;
@@ -294,7 +298,11 @@ void CannedMessagesScreen::renderMessageSelection(DisplayDriver &display) {
   }
 
   display.setColor(DisplayDriver::BLUE);
+#ifdef USE_ENCODER
+  display.drawTextCentered(display.width() / 2, 54, "Rotate Long=OK");
+#else
   display.drawTextCentered(display.width() / 2, 54, "Click=Next Long=OK");
+#endif
 #endif
 }
 
@@ -316,8 +324,31 @@ void CannedMessagesScreen::renderConfirmSend(DisplayDriver &display) {
   display.setColor(DisplayDriver::BLUE);
   display.drawTextCentered(display.width() / 2, 54, "\x1B=Back \x18=Yes \x19=No");
 
+#elif defined(USE_ENCODER)
+  // Encoder: Show mini menu with Send/Back options
+  display.setColor(DisplayDriver::BLUE);
+  display.setTextSize(1);
+
+  // Show both options side by side
+  const char *options[] = { "Send", "Back" };
+  int x_spacing = display.width() / 3;
+
+  for (int i = 0; i < 2; i++) {
+    if (i == confirm_option) {
+      display.setColor(DisplayDriver::YELLOW);
+      display.fillRect(x_spacing * (i + 1) - 15, 43, 30, 10);
+      display.setColor(DisplayDriver::DARK);
+    } else {
+      display.setColor(DisplayDriver::GREEN);
+    }
+    display.drawTextCentered(x_spacing * (i + 1), 45, options[i]);
+  }
+
+  display.setColor(DisplayDriver::BLUE);
+  display.drawTextCentered(display.width() / 2, 54, "Rotate Press=OK");
+
 #elif defined(PIN_USER_BTN)
-  // Simple two-action confirm - no cycling needed
+  // Single button: simple text
   display.setColor(DisplayDriver::BLUE);
   display.drawTextCentered(display.width() / 2, 54, "Click=Back Long=Send");
 #endif
@@ -389,21 +420,26 @@ bool CannedMessagesScreen::handleInput(char c) {
     }
   }
 
-#elif defined(PIN_USER_BTN)
+#elif defined(PIN_USER_BTN) || defined(USE_ENCODER)
   // ============================================================
-  // SINGLE BUTTON NAVIGATION
-  // KEY_NEXT  = single click  = cycle / go back
-  // KEY_ENTER = long press    = select / send
+  // SINGLE BUTTON / ENCODER NAVIGATION
+  // KEY_UP    = rotate CCW / previous
+  // KEY_DOWN  = rotate CW / next
+  // KEY_NEXT  = button click
+  // KEY_ENTER = button long press
   // ============================================================
 
+#ifdef USE_ENCODER
+  // Rotary encoder rotation
   if (c == KEY_NEXT) {
+    // Rotate clockwise = next item
     if (confirm_send) {
-      // Single click on confirm screen = go back to message selection
-      confirm_send = false;
-      confirm_option = 0;
+      // On confirm screen: toggle between Send(0) and Back(1)
+      confirm_option = (confirm_option + 1) % 2;
     } else if (in_channel_selection) {
+      // Next valid channel or back option
       if (selected_channel == -1) {
-        // Currently on back - wrap to first valid channel
+        // From back, wrap to first channel
         selected_channel = 0;
         while (selected_channel < MAX_GROUP_CHANNELS && !isValidChannel(selected_channel)) {
           selected_channel++;
@@ -420,17 +456,16 @@ bool CannedMessagesScreen::handleInput(char c) {
           }
           next++;
         }
-        // No more valid channels - go to back option
-        if (!found) selected_channel = -1;
+        if (!found) selected_channel = -1; // Go to back
       }
     } else {
-      // Cycle through messages + back option (wraps at message_count + 1)
+      // Next message
       selected_message++;
       if (selected_message > message_count) {
-        selected_message = 0; // Wrap to first message
+        selected_message = 0;
       }
 
-      // Update scroll offset - back option scrolls into view like any other item
+      // Update scroll
       if (selected_message < scroll_offset) scroll_offset = selected_message;
       if (selected_message >= scroll_offset + MESSAGES_PER_PAGE)
         scroll_offset = selected_message - MESSAGES_PER_PAGE + 1;
@@ -438,26 +473,98 @@ bool CannedMessagesScreen::handleInput(char c) {
     return true;
   }
 
+  if (c == KEY_PREV) {
+    // Rotate counter-clockwise = previous item
+    if (confirm_send) {
+      // On confirm screen: toggle between Send(0) and Back(1)
+      confirm_option = (confirm_option + 1) % 2;
+    } else if (in_channel_selection) {
+      // Previous valid channel or back option
+      if (selected_channel == -1) {
+        // From back, go to last valid channel
+        selected_channel = MAX_GROUP_CHANNELS - 1;
+        while (selected_channel >= 0 && !isValidChannel(selected_channel)) {
+          selected_channel--;
+        }
+      } else if (selected_channel == 0 || (selected_channel > 0 && !isValidChannel(selected_channel - 1))) {
+        // From first channel, find previous valid or go to back
+        int prev = selected_channel - 1;
+        bool found = false;
+        while (prev >= 0) {
+          if (isValidChannel(prev)) {
+            selected_channel = prev;
+            found = true;
+            break;
+          }
+          prev--;
+        }
+        if (!found) selected_channel = -1; // Go to back
+      } else {
+        // Find previous valid channel
+        selected_channel--;
+        while (selected_channel >= 0 && !isValidChannel(selected_channel)) {
+          selected_channel--;
+        }
+        if (selected_channel < 0) selected_channel = -1;
+      }
+    } else {
+      // Previous message
+      selected_message--;
+      if (selected_message < 0) {
+        selected_message = message_count; // Wrap to back
+      }
+
+      // Update scroll
+      if (selected_message < scroll_offset) scroll_offset = selected_message;
+      if (selected_message >= scroll_offset + MESSAGES_PER_PAGE)
+        scroll_offset = selected_message - MESSAGES_PER_PAGE + 1;
+    }
+    return true;
+  }
+#endif
+
+  // Button short press - KEY_PREV (acts as "back" button)
+  // This is sent when encoder button is briefly clicked
+  if (c == KEY_PREV && confirm_send) {
+    // On confirm screen only: short press = go back
+    confirm_send = false;
+    confirm_option = 0;
+    return true;
+  }
+
+  // Button press - KEY_ENTER
   if (c == KEY_ENTER) {
     if (confirm_send) {
-      // Long press on confirm screen = send
+#ifdef USE_ENCODER
+      // Encoder: execute whichever option is selected (Send or Back)
+      if (confirm_option == 0) {
+        // Send selected
+        _pending_send = true;
+      } else {
+        // Back selected
+        confirm_send = false;
+        confirm_option = 0;
+      }
+#else
+      // Single button: long press = send
       _pending_send = true;
+#endif
     } else if (in_channel_selection) {
       if (selected_channel == -1) {
-        // Back to home
+        // Back option selected
         _task->gotoHomeScreen();
       } else {
-        // Confirm channel, go to message selection
+        // Channel selected, go to message selection
         in_channel_selection = false;
         selected_message = 0;
         scroll_offset = 0;
       }
     } else {
       if (selected_message >= message_count) {
-        // Back to channel selection
+        // Back option selected
         in_channel_selection = true;
       } else {
-        // Confirm message, go to confirm screen
+        // Message selected, go to confirm
         confirm_send = true;
         confirm_option = 0;
       }

@@ -33,8 +33,8 @@ private:
   bool in_channel_selection;
   bool confirm_send;
 
-#ifdef PIN_USER_BTN
-  int confirm_option; // 0=Send, 1=Cancel, 2=Back (only used for single button)
+#if defined(PIN_USER_BTN) || defined(USE_ENCODER)
+  int confirm_option; // 0=Send, 1=Cancel, 2=Back
   int getValidChannelCount();
   int getTotalItems();
   bool isOnBackOption();

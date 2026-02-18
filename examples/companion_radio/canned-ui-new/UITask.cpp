@@ -20,6 +20,10 @@ static uint8_t canned_msg_buffer[120]; // 108 bytes + padding
 static bool canned_msg_initialized = false;
 #endif
 
+#ifdef USE_ENCODER
+RotaryEncoderISR rotary_encoder(PIN_ENCODER_CLK, PIN_ENCODER_DT, PIN_ENCODER_SW, 1200);
+#endif
+
 #ifndef AUTO_OFF_MILLIS
 #define AUTO_OFF_MILLIS 15000 // 15 seconds
 #endif
@@ -638,9 +642,10 @@ void UITask::begin(DisplayDriver *display, SensorManager *sensors, NodePrefs *no
 #if defined(PIN_USER_JOYSTICK)
   analog_joystick.begin();
 #endif
-
   _node_prefs = node_prefs;
-
+#ifdef USE_ENCODER
+  rotary_encoder.begin();
+#endif
 #if ENV_INCLUDE_GPS == 1
   // Apply GPS preferences from stored prefs
   if (_sensors != NULL && _node_prefs != NULL) {
@@ -867,11 +872,15 @@ bool UITask::isButtonPressed() const {
 
 void UITask::loop() {
   char c = 0;
+#if defined(UI_HAS_JOYSTICK) || defined(PIN_USER_BTN) || defined(PIN_USER_BTN_ANA) || \
+    defined(PIN_USER_JOYSTICK) || defined(USE_ENCODER)
+  int ev = 0;
+#endif
 #ifdef USE_FAN_PWM
   fan.update();
 #endif
 #if UI_HAS_JOYSTICK
-  int ev = user_btn.check();
+  ev = user_btn.check();
   if (ev == BUTTON_EVENT_CLICK) {
     c = checkDisplayOn(KEY_ENTER);
   } else if (ev == BUTTON_EVENT_LONG_PRESS) {
@@ -894,7 +903,7 @@ void UITask::loop() {
     c = handleTripleClick(KEY_SELECT);
   }
 #elif defined(PIN_USER_BTN)
-  int ev = user_btn.check();
+  ev = user_btn.check();
   if (ev == BUTTON_EVENT_CLICK) {
     c = checkDisplayOn(KEY_NEXT);
   } else if (ev == BUTTON_EVENT_LONG_PRESS) {
@@ -945,6 +954,18 @@ void UITask::loop() {
       }
     }
     _analogue_pin_read_millis = millis();
+  }
+#endif
+#ifdef USE_ENCODER
+  ev = rotary_encoder.check();
+  if (ev == ENCODER_EVENT_CW) {
+    c = checkDisplayOn(KEY_NEXT); // Clockwise = down
+  } else if (ev == ENCODER_EVENT_CCW) {
+    c = checkDisplayOn(KEY_PREV); // Counter-clockwise = up
+  } else if (ev == ENCODER_EVENT_CLICK) {
+    c = checkDisplayOn(KEY_ENTER); // Button click = next
+  } else if (ev == ENCODER_EVENT_LONG_PRESS) {
+    c = handleLongPress(KEY_ENTER); // Button long press = enter
   }
 #endif
 #if defined(BACKLIGHT_BTN)
