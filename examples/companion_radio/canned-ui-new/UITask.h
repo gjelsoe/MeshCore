@@ -59,9 +59,9 @@ class UITask : public AbstractUITask {
   int last_led_increment = 0;
 #endif
 
-bool notification_acknowledged = false; // User acked new MSG
+  bool notification_acknowledged = false; // User acked new MSG
 
-#ifdef RADIOMASTER_900_BANDIT    // NeoPixel message notification support
+#ifdef RADIOMASTER_900_BANDIT // NeoPixel message notification support
   int neopixel_state = 0;
   unsigned long next_neopixel_change = 0;
   uint8_t neopixel_brightness = 0;

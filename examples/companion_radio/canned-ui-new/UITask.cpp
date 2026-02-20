@@ -872,7 +872,7 @@ bool UITask::isButtonPressed() const {
 
 void UITask::loop() {
   char c = 0;
-#if defined(UI_HAS_JOYSTICK) || defined(PIN_USER_BTN) || defined(PIN_USER_BTN_ANA) || \
+#if defined(UI_HAS_JOYSTICK) || defined(PIN_USER_BTN) || defined(PIN_USER_BTN_ANA) ||                        \
     defined(PIN_USER_JOYSTICK) || defined(USE_ENCODER)
   int ev = 0;
 #endif
