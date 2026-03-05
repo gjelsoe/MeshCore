@@ -93,8 +93,6 @@ const PowerCalibration calibration[] = {
   { 30, 10, 110 } // 1000mW
 };
 
-inline Adafruit_NeoPixel pixels(NEOPIXEL_NUM, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
-
 const int NUM_CAL_POINTS = sizeof(calibration) / sizeof(calibration[0]);
 
 class BanditBoard : public ESP32Board {
@@ -127,14 +125,14 @@ public:
 
   void onBeforeTransmit() override {
     // Use user-defined TX LED color
-    for (byte i = 2; i <= 6; i++) {
+    for (byte i = 2; i < NEOPIXEL_NUM; i++) {
       pixels.setPixelColor(i, pixels.Color(TX_LED_RED, TX_LED_GREEN, TX_LED_BLUE));
     }
     pixels.show();
   }
 
   void onAfterTransmit() override {
-    for (byte i = 2; i <= 6; i++) {
+    for (byte i = 2; i < NEOPIXEL_NUM; i++) {
       pixels.setPixelColor(i, pixels.Color(0, 0, 0));
     }
     pixels.show();
