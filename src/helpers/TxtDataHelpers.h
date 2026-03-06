@@ -7,6 +7,10 @@
 #define TXT_TYPE_CLI_DATA       1    // a CLI command
 #define TXT_TYPE_SIGNED_PLAIN   2    // plain text, signed by sender
 
+#ifdef USE_LZW
+#define TXT_FLAG_COMPRESSED     0x80  // bit 7 of payload byte[4] — indicates Unishox2 compressed content
+#endif
+
 class StrHelper {
 public:
   static void strncpy(char* dest, const char* src, size_t buf_sz);
