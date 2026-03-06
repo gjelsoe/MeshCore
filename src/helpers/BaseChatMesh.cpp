@@ -47,8 +47,7 @@ mesh::Packet *BaseChatMesh::createSelfAdvert(const char *name, double lat, doubl
 }
 
 void BaseChatMesh::sendAckTo(const ContactInfo &dest, uint32_t ack_hash) {
-
-  if (dest.out_path_len < 0) {
+  if (dest.out_path_len == OUT_PATH_UNKNOWN) {
     mesh::Packet *ack = createAck(ack_hash);
     if (ack) sendFloodScoped(dest, ack, TXT_ACK_DELAY);
   } else {
@@ -102,7 +101,7 @@ void BaseChatMesh::populateContactFromAdvert(ContactInfo &ci, const mesh::Identi
                                              const AdvertDataParser &parser, uint32_t timestamp) {
   memset(&ci, 0, sizeof(ci));
   ci.id = id;
-  ci.out_path_len = -1; // initially out_path is unknown
+  ci.out_path_len = OUT_PATH_UNKNOWN;
   StrHelper::strncpy(ci.name, parser.getName(), sizeof(ci.name));
   ci.type = parser.getType();
   if (parser.hasLatLon()) {
@@ -148,6 +147,15 @@ void BaseChatMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, 
   bool is_new = false; // true = not in contacts[], false = exists in contacts[]
   if (from == NULL) {
     if (!shouldAutoAddContactType(parser.getType())) {
+      ContactInfo ci;
+      populateContactFromAdvert(ci, id, parser, timestamp);
+      onDiscoveredContact(ci, true, packet->path_len, packet->path); // let UI know
+      return;
+    }
+
+    // check hop limit for new contacts (0 = no limit, 1 = direct (0 hops), N = up to N-1 hops)
+    uint8_t max_hops = getAutoAddMaxHops();
+    if (max_hops > 0 && packet->getPathHashCount() >= max_hops) {
       ContactInfo ci;
       populateContactFromAdvert(ci, id, parser, timestamp);
       onDiscoveredContact(ci, true, packet->path_len, packet->path); // let UI know
@@ -312,7 +320,7 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender
       } else {
         mesh::Packet *reply = createDatagram(PAYLOAD_TYPE_RESPONSE, from.id, secret, temp_buf, reply_len);
         if (reply) {
-          if (from.out_path_len >= 0) {
+          if (from.out_path_len != OUT_PATH_UNKNOWN) { // we have an out_path, so send DIRECT
             sendDirect(reply, from.out_path, from.out_path_len, SERVER_RESPONSE_DELAY);
           } else {
             sendFloodScoped(from, reply, SERVER_RESPONSE_DELAY);
@@ -322,7 +330,9 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender
     }
   } else if (type == PAYLOAD_TYPE_RESPONSE && len > 0) {
     onContactResponse(from, data, len);
-    if (packet->isRouteFlood() && from.out_path_len >= 0) {
+    if (packet->isRouteFlood() && from.out_path_len != OUT_PATH_UNKNOWN) {
+      // we have direct path, but other node is still sending flood response, so maybe they didn't receive
+      // reciprocal path properly(?)
       handleReturnPathRetry(from, packet->path, packet->path_len);
     }
   }
@@ -347,7 +357,8 @@ bool BaseChatMesh::onContactPathRecv(ContactInfo &from, uint8_t *in_path, uint8_
                                      uint8_t *extra, uint8_t extra_len) {
   // NOTE: default impl, we just replace the current 'out_path' regardless, whenever sender sends us a new
   // out_path. FUTURE: could store multiple out_paths per contact, and try to find which is the 'best'(?)
-  memcpy(from.out_path, out_path, from.out_path_len = out_path_len); // store a copy of path, for sendDirect()
+  from.out_path_len =
+      mesh::Packet::copyPath(from.out_path, out_path, out_path_len); // store a copy of path, for sendDirect()
   from.lastmod = getRTCClock()->getCurrentTime();
 
   onContactPathUpdated(from);
@@ -369,7 +380,7 @@ void BaseChatMesh::onAckRecv(mesh::Packet *packet, uint32_t ack_crc) {
     txt_send_timeout = 0;          // matched one we're waiting for, cancel timeout timer
     packet->markDoNotRetransmit(); // ACK was for this node, so don't retransmit
 
-    if (packet->isRouteFlood() && from->out_path_len >= 0) {
+    if (packet->isRouteFlood() && from->out_path_len != OUT_PATH_UNKNOWN) {
       // we have direct path, but other node is still sending flood, so maybe they didn't receive reciprocal
       // path properly(?)
       handleReturnPathRetry(*from, packet->path, packet->path_len);
@@ -466,7 +477,7 @@ int BaseChatMesh::sendMessage(const ContactInfo &recipient, uint32_t timestamp, 
   uint32_t t = _radio->getEstAirtimeFor(pkt->getRawLength());
 
   int rc;
-  if (recipient.out_path_len < 0) {
+  if (recipient.out_path_len == OUT_PATH_UNKNOWN) {
     sendFloodScoped(recipient, pkt);
     txt_send_timeout = futureMillis(est_timeout = calcFloodTimeoutMillisFor(t));
     rc = MSG_SEND_SENT_FLOOD;
@@ -494,7 +505,7 @@ int BaseChatMesh::sendCommandData(const ContactInfo &recipient, uint32_t timesta
 
   uint32_t t = _radio->getEstAirtimeFor(pkt->getRawLength());
   int rc;
-  if (recipient.out_path_len < 0) {
+  if (recipient.out_path_len == OUT_PATH_UNKNOWN) {
     sendFloodScoped(recipient, pkt);
     txt_send_timeout = futureMillis(est_timeout = calcFloodTimeoutMillisFor(t));
     rc = MSG_SEND_SENT_FLOOD;
@@ -586,7 +597,7 @@ int BaseChatMesh::sendLogin(const ContactInfo &recipient, const char *password, 
   }
   if (pkt) {
     uint32_t t = _radio->getEstAirtimeFor(pkt->getRawLength());
-    if (recipient.out_path_len < 0) {
+    if (recipient.out_path_len == OUT_PATH_UNKNOWN) {
       sendFloodScoped(recipient, pkt);
       est_timeout = calcFloodTimeoutMillisFor(t);
       return MSG_SEND_SENT_FLOOD;
@@ -613,7 +624,7 @@ int BaseChatMesh::sendAnonReq(const ContactInfo &recipient, const uint8_t *data,
   }
   if (pkt) {
     uint32_t t = _radio->getEstAirtimeFor(pkt->getRawLength());
-    if (recipient.out_path_len < 0) {
+    if (recipient.out_path_len == OUT_PATH_UNKNOWN) {
       sendFloodScoped(recipient, pkt);
       est_timeout = calcFloodTimeoutMillisFor(t);
       return MSG_SEND_SENT_FLOOD;
@@ -642,7 +653,7 @@ int BaseChatMesh::sendRequest(const ContactInfo &recipient, const uint8_t *req_d
   }
   if (pkt) {
     uint32_t t = _radio->getEstAirtimeFor(pkt->getRawLength());
-    if (recipient.out_path_len < 0) {
+    if (recipient.out_path_len == OUT_PATH_UNKNOWN) {
       sendFloodScoped(recipient, pkt);
       est_timeout = calcFloodTimeoutMillisFor(t);
       return MSG_SEND_SENT_FLOOD;
@@ -671,7 +682,7 @@ int BaseChatMesh::sendRequest(const ContactInfo &recipient, uint8_t req_type, ui
   }
   if (pkt) {
     uint32_t t = _radio->getEstAirtimeFor(pkt->getRawLength());
-    if (recipient.out_path_len < 0) {
+    if (recipient.out_path_len == OUT_PATH_UNKNOWN) {
       sendFloodScoped(recipient, pkt);
       est_timeout = calcFloodTimeoutMillisFor(t);
       return MSG_SEND_SENT_FLOOD;
@@ -775,7 +786,7 @@ void BaseChatMesh::checkConnections() {
         MESH_DEBUG_PRINTLN("checkConnections(): Keep_alive contact not found!");
         continue;
       }
-      if (contact->out_path_len < 0) {
+      if (contact->out_path_len == OUT_PATH_UNKNOWN) {
         MESH_DEBUG_PRINTLN("checkConnections(): Keep_alive contact, no out_path!");
         continue;
       }
@@ -802,7 +813,7 @@ void BaseChatMesh::checkConnections() {
 }
 
 void BaseChatMesh::resetPathTo(ContactInfo &recipient) {
-  recipient.out_path_len = -1;
+  recipient.out_path_len = OUT_PATH_UNKNOWN;
 }
 
 static ContactInfo *table; // pass via global :-(

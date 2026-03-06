@@ -727,7 +727,7 @@ void UITask::neopixelMsgHandler() {
       uint8_t g = (NEOPIXEL_MSG_GREEN * neopixel_brightness) / NEOPIXEL_MAX_BRIGHTNESS;
       uint8_t b = (NEOPIXEL_MSG_BLUE * neopixel_brightness) / NEOPIXEL_MAX_BRIGHTNESS;
 
-      for (int i = 2; i <= 6; i++) {
+      for (int i = 2; i < NEOPIXEL_NUM; i++) {
         pixels.setPixelColor(i, pixels.Color(r, g, b));
       }
       pixels.show();
@@ -740,7 +740,7 @@ void UITask::neopixelMsgHandler() {
     if (neopixel_brightness > 0) {
       neopixel_brightness = 0;
       neopixel_brightness_increasing = true;
-      for (int i = 2; i <= 6; i++) {
+      for (int i = 2; i < NEOPIXEL_NUM; i++) {
         pixels.setPixelColor(i, pixels.Color(0, 0, 0));
       }
       pixels.show();
