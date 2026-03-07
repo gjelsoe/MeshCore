@@ -434,6 +434,9 @@ mesh::Packet *BaseChatMesh::composeMsgPacket(const ContactInfo &recipient, uint3
   temp[4] = (attempt & 3);
 
 #ifdef USE_LZW
+  MESH_DEBUG_PRINTLN("composeMsgPacket: recipient=%s, supports_lzw=%s, flags=0x%02X", recipient.name,
+                     (recipient.flags & CONTACT_FLAG_SUPPORTS_LZW) ? "YES" : "NO", recipient.flags);
+
   if (recipient.flags & CONTACT_FLAG_SUPPORTS_LZW) {
     uint8_t comp_buf[MAX_TEXT_LEN];
     int comp_len = mesh_text_compress(text, text_len, comp_buf, sizeof(comp_buf));
