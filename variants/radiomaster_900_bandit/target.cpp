@@ -97,7 +97,7 @@ static const int NUM_CAL_POINTS = sizeof(calibration) / sizeof(calibration[0]);
  */
 int16_t lerp_int(uint8_t x, uint8_t x0, uint8_t x1, int16_t y0, int16_t y1) {
   if (x1 == x0) return y0;
-  return y0 + ((int16_t)(x - x0) * (y1 - y0)) / (x1 - x0);
+  return y0 + (int16_t)(((int32_t)(x - x0) * (y1 - y0)) / (x1 - x0));
 }
 
 /**

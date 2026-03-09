@@ -699,6 +699,8 @@ void UITask::userLedHandler() {
 
 #ifdef RADIOMASTER_900_BANDIT
 void UITask::neopixelMsgHandler() {
+  if (board.tx_active) return; // Don't overwrite TX flash
+
   unsigned long cur_time = millis();
 
   if (_msgcount > 0) {

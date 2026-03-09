@@ -37,51 +37,17 @@ extern Adafruit_NeoPixel pixels;
   - TX LED on GPIO 15
 */
 
-/*
-  Pin connections from ESP32-D0WDQ6 to SX1276.
-*/
-#define P_LORA_DIO_0     22
-#define P_LORA_DIO_1     21
-#define P_LORA_NSS       4
-#define P_LORA_RESET     5
-#define P_LORA_SCLK      18
-#define P_LORA_MISO      19
-#define P_LORA_MOSI      23
-#define SX176X_TXEN      33
+// All pin definitions are in platformio.ini via -D flags.
+// See platformio.ini [radiomaster_900_bandit_base] for LoRa, I2C, joystick pins.
 
-/*
-  I2C SDA and SCL.
-*/
-#define PIN_BOARD_SDA    14
-#define PIN_BOARD_SCL    12
-
-/*
-  This unit has a FAN built-in.
-  FAN is active at 250mW on its ExpressLRS Firmware.
-  Always ON
-*/
-#define PA_FAN_EN        2 // FAN on GPIO 2
-
-/*
-  This module has Skyworks SKY66122 controlled by dacWrite
-  power ranging from 100mW to 1000mW.
-
-  Mapping of PA_LEVEL to Power output: GPIO26/dacWrite
-  168 -> 100mW  -> 2.11v
-  148 -> 250mW  -> 1.87v
-  128 -> 500mW  -> 1.63v
-  90  -> 1000mW -> 1.16v
-*/
-#define DAC_PA_PIN       26 // GPIO 26 controls the PA
-
-// Configuration - adjust these for your hardware
-#define PA_CONSTANT_GAIN 18 // SKY66122 operates at constant 18dB gain
 #define MIN_OUTPUT_DBM   20 // 100mW minimum
 #define MAX_OUTPUT_DBM   30 // 1000mW maximum
 
 class BanditBoard : public ESP32Board {
 public:
 #ifdef RADIOMASTER_900_BANDIT
+  volatile bool tx_active = false;
+
   void begin() {
     ESP32Board::begin();
     pixels.begin();
@@ -119,6 +85,7 @@ public:
 
 #ifdef RADIOMASTER_900_BANDIT
   void onBeforeTransmit() override {
+    tx_active = true;
     for (byte i = 2; i < NEOPIXEL_NUM; i++) {
       pixels.setPixelColor(i, pixels.Color(TX_LED_RED, TX_LED_GREEN, TX_LED_BLUE));
     }
@@ -130,6 +97,7 @@ public:
       pixels.setPixelColor(i, pixels.Color(0, 0, 0));
     }
     pixels.show();
+    tx_active = false;
   }
 #endif
 };

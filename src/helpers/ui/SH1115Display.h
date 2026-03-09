@@ -20,8 +20,6 @@ class SH1115Display : public DisplayDriver {
   bool _isOn;
   uint8_t _color;
 
-  bool i2c_probe(TwoWire &wire, uint8_t addr);
-
 public:
   SH1115Display() : DisplayDriver(128, 64), display(128, 64, &Wire, PIN_OLED_RESET) { _isOn = false; }
   bool begin();
