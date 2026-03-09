@@ -1,13 +1,11 @@
 #pragma once
 
-#include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
 #include <helpers/ESP32Board.h>
 #include <helpers/ui/AnalogJoystick.h>
 
-#define RADIOMASTER_900_BANDIT
-#define DISPLAY_CLASS SH1115Display
-
+#ifdef RADIOMASTER_900_BANDIT
+#include <Adafruit_NeoPixel.h>
 extern Adafruit_NeoPixel pixels;
 
 // User-definable TX LED color (RGB hex format)
@@ -20,17 +18,23 @@ extern Adafruit_NeoPixel pixels;
 #define TX_LED_RED       ((TX_LED_COLOR >> 16) & 0xFF)
 #define TX_LED_GREEN     ((TX_LED_COLOR >> 8) & 0xFF)
 #define TX_LED_BLUE      (TX_LED_COLOR & 0xFF)
+#endif
 
 /*
-  6 x Neopixels, GRB
-  GPIO 15
-  Backgroundlight button 1 at index 0
-  Backgroundlight button 2 at index 1
+  Radiomaster Bandit / Bandit Nano shared hardware:
+  - ESP32-D0WDQ6 + SX1276 LoRa
+  - Skyworks SKY66122 PA (100mW-1000mW, DAC-controlled)
+  - Analog 5-way joystick on GPIO 39
 
-  Button 1 at GPIO 34 - UNUSED
-  Button 2 at GPIO 35 - UNUSED
+  Bandit only:
+  - 6x Neopixels (GRB, GPIO 15)
+  - SH1115 OLED display
+  - 2x buttons with backlight (GPIO 34/35 - UNUSED)
+  - STK8XXX Accelerometer (I2C 0x18, INT GPIO 37)
 
-  STK8XXX Accelerometer I2C address 0x18 and Interrupt at GPIO 37
+  Bandit Nano only:
+  - SSD1306 OLED display (rotated 180 deg)
+  - TX LED on GPIO 15
 */
 
 /*
@@ -53,14 +57,14 @@ extern Adafruit_NeoPixel pixels;
 
 /*
   This unit has a FAN built-in.
-  FAN is active at 250mW on it's ExpressLRS Firmware.
+  FAN is active at 250mW on its ExpressLRS Firmware.
   Always ON
 */
 #define PA_FAN_EN        2 // FAN on GPIO 2
 
 /*
   This module has Skyworks SKY66122 controlled by dacWrite
-  power rangeing from 100mW to 1000mW.
+  power ranging from 100mW to 1000mW.
 
   Mapping of PA_LEVEL to Power output: GPIO26/dacWrite
   168 -> 100mW  -> 2.11v
@@ -68,60 +72,53 @@ extern Adafruit_NeoPixel pixels;
   128 -> 500mW  -> 1.63v
   90  -> 1000mW -> 1.16v
 */
-#define DAC_PA_PIN       26 // GPIO 26 enables the PA
+#define DAC_PA_PIN       26 // GPIO 26 controls the PA
 
 // Configuration - adjust these for your hardware
 #define PA_CONSTANT_GAIN 18 // SKY66122 operates at constant 18dB gain
 #define MIN_OUTPUT_DBM   20 // 100mW minimum
 #define MAX_OUTPUT_DBM   30 // 1000mW maximum
 
-// Calibration points from manufacturer
-struct PowerCalibration {
-  uint8_t output_dbm;
-  int8_t sx1278_dbm;
-  uint8_t dac_value;
-};
-
-// Values are from Radiomaster.
-const PowerCalibration calibration[] = {
-  { 20, 2, 165 }, // 100mW
-  { 24, 6, 155 }, // 250mW
-  { 27, 9, 142 }, // 500mW
-  { 30, 10, 110 } // 1000mW
-};
-
-const int NUM_CAL_POINTS = sizeof(calibration) / sizeof(calibration[0]);
-
 class BanditBoard : public ESP32Board {
-private:
 public:
+#ifdef RADIOMASTER_900_BANDIT
   void begin() {
     ESP32Board::begin();
     pixels.begin();
     pixels.clear();
-    //    pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-    //    pixels.setPixelColor(1, pixels.Color(0, 255, 0));
     pixels.show();
   }
+#endif
+
   // Return fake battery status, battery/fixed power is not monitored.
   uint16_t getBattMilliVolts() override { return 5000; }
 
-  const char *getManufacturerName() const override { return "RadioMaster Bandit"; }
+  const char *getManufacturerName() const override {
+#ifdef RADIOMASTER_900_BANDIT_NANO
+    return "RadioMaster Bandit Nano";
+#else
+    return "RadioMaster Bandit";
+#endif
+  }
 
-  // Add wake-enabled power off
   void powerOff() override {
 #if defined(PIN_USER_BTN)
-    esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_USER_BTN, LOW); // Wake when button pressed (LOW)
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_USER_BTN, LOW);
 #elif defined(PIN_USER_JOYSTICK)
-    // For analog joystick, you'd need to use the center button GPIO
     esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_USER_JOYSTICK, LOW);
 #endif
-    // Enter deep sleep
+    // Disable PA and fan before deep sleep
+    dacWrite(DAC_PA_PIN, 0);
+    digitalWrite(PA_FAN_EN, LOW);
+#ifdef RADIOMASTER_900_BANDIT
+    pixels.clear();
+    pixels.show();
+#endif
     esp_deep_sleep_start();
   }
 
+#ifdef RADIOMASTER_900_BANDIT
   void onBeforeTransmit() override {
-    // Use user-defined TX LED color
     for (byte i = 2; i < NEOPIXEL_NUM; i++) {
       pixels.setPixelColor(i, pixels.Color(TX_LED_RED, TX_LED_GREEN, TX_LED_BLUE));
     }
@@ -134,4 +131,5 @@ public:
     }
     pixels.show();
   }
+#endif
 };

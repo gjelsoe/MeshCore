@@ -1,6 +1,5 @@
 #include "SH1115Display.h"
 #include <Adafruit_GrayOLED.h>
-//#include "Adafruit_SH110X.h"
 #include <Adafruit_SH1115.h>
 
 bool SH1115Display::i2c_probe(TwoWire &wire, uint8_t addr)

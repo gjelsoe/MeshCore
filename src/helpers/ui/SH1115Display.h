@@ -5,7 +5,6 @@
 #include <Adafruit_GFX.h>
 #include <Wire.h>
 #define SH110X_NO_SPLASH
-// #include <Adafruit_SH110X.h>
 #include <Adafruit_SH1115.h>
 
 #ifndef PIN_OLED_RESET
