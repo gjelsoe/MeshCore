@@ -1,18 +1,27 @@
 #include "CannedMessagesScreen.h"
 
 #include "../MyMesh.h"
+#include "../AbstractUITask.h"
 #include "UITask.h"
 
 #include <Arduino.h>
 
-// Canned messages - can be customized in Platformio.ini for your device.
-// ------------------------------------------------------------
-#ifndef CANNED_MESSAGES
-#define CANNED_MESSAGES                                                                               \
-  "Help", "On my way", "Yes", "No", "Roger that", "10-4", "Location?", "Call me", "Busy", "Available"
+// Platform filesystem resolution — mirrors the pattern in main.cpp
+// Only touches /canned-ui-new, no changes outside this folder.
+// ----------------------------------------------------------------
+#if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
+  #include <Adafruit_LittleFS.h>
+  using namespace Adafruit_LittleFS_Namespace;
+  static Adafruit_LittleFS& _canned_fs() { return InternalFS; }
+#elif defined(RP2040_PLATFORM)
+  #include <LittleFS.h>
+  static fs::FS& _canned_fs() { return LittleFS; }
+#elif defined(ESP32)
+  #include <SPIFFS.h>
+  static fs::FS& _canned_fs() { return SPIFFS; }
 #endif
 
-static constexpr const char *DEFAULT_MESSAGES[] = { CANNED_MESSAGES, nullptr };
+
 
 // ------------------------------------------------------------
 // Constructor
@@ -25,37 +34,20 @@ CannedMessagesScreen::CannedMessagesScreen(UITask *task)
       confirm_option(0)
 #endif
 {
-  // Initialize array
-  for (int i = 0; i < MAX_MSG_COUNT; i++)
+  for (int i = 0; i < MAX_MSG_COUNT; i++) {
+    _msg_buf[i][0] = '\0';
     messages[i] = nullptr;
-
-  // Copy messages, skipping ones that are too long
-  int srcIndex = 0;
-  int destIndex = 0;
-
-  while (srcIndex < MAX_MSG_COUNT && DEFAULT_MESSAGES[srcIndex] != nullptr) {
-    const char *msg = DEFAULT_MESSAGES[srcIndex];
-    int len = strlen(msg);
-
-    if (len <= MAX_MSG_LENGTH) {
-      messages[destIndex] = msg;
-      destIndex++;
-    } else {
-      Serial.printf("WARNING: Skipping message %d (too long: %d chars): \"%s\"\n", srcIndex + 1, len, msg);
-    }
-
-    srcIndex++;
   }
 
+  // Load from /canned.txt — creates the file from defaults on first boot
+  loadFromFile();
+
   reset();
-  countMessages();
 
 #ifdef MAX_GROUP_CHANNELS
   selected_channel = 0;
   if (!isValidChannel(selected_channel)) nextChannel(true);
 #endif
-
-  Serial.printf("CannedMessages: Loaded %d valid messages\n", message_count);
 }
 
 // ------------------------------------------------------------
@@ -77,7 +69,106 @@ void CannedMessagesScreen::reset() {
 }
 
 // ------------------------------------------------------------
-// Message helpers
+// File-based message persistence
+// ------------------------------------------------------------
+void CannedMessagesScreen::loadFromFile() {
+  for (int i = 0; i < MAX_MSG_COUNT; i++) {
+    _msg_buf[i][0] = '\0';
+    messages[i] = nullptr;
+  }
+  message_count = 0;
+
+  File f = _canned_fs().open(CANNED_FILE, "r");
+  if (!f) {
+    Serial.println("CannedMessages: /canned.txt not found");
+    return;
+  }
+
+  while (f.available() && message_count < MAX_MSG_COUNT) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) continue;
+    if ((int)line.length() > MAX_MSG_LENGTH) {
+      Serial.printf("CannedMessages: Skipping line (too long: %d chars): \"%s\"\n",
+                    line.length(), line.c_str());
+      continue;
+    }
+    strncpy(_msg_buf[message_count], line.c_str(), MAX_MSG_LENGTH);
+    _msg_buf[message_count][MAX_MSG_LENGTH] = '\0';
+    messages[message_count] = _msg_buf[message_count];
+    message_count++;
+  }
+  f.close();
+
+  Serial.printf("CannedMessages: Loaded %d messages from %s\n", message_count, CANNED_FILE);
+}
+
+bool CannedMessagesScreen::saveToFile() {
+  File f = _canned_fs().open(CANNED_FILE, "w");
+  if (!f) {
+    Serial.println("CannedMessages: Failed to open /canned.txt for writing");
+    return false;
+  }
+  for (int i = 0; i < message_count; i++) {
+    f.println(_msg_buf[i]);
+  }
+  f.close();
+  Serial.printf("CannedMessages: Saved %d messages to %s\n", message_count, CANNED_FILE);
+  return true;
+}
+
+// ------------------------------------------------------------
+// CLI handler — works with or without a live UI instance
+// ------------------------------------------------------------
+void CannedMessagesScreen::handleCLI(const char *command, AbstractUITask *ui) {
+  const char *sub = command[6] == ' ' ? &command[7] : "";
+
+  // Resolve live screen from UI if available, otherwise use a temporary instance
+  CannedMessagesScreen tmp;
+  CannedMessagesScreen *cs = nullptr;
+  if (ui) {
+    cs = (CannedMessagesScreen *)((UITask *)ui)->getCannedScreen();
+  }
+  if (!cs) cs = &tmp;
+
+  if (strcmp(sub, "list") == 0 || strcmp(sub, "") == 0) {
+    int n = cs->getMessageCount();
+    Serial.printf("  /canned.txt - %d message(s):\n", n);
+    for (int i = 0; i < n; i++)
+      Serial.printf("  [%d] %s\n", i, cs->getMessage(i));
+
+  } else if (memcmp(sub, "add ", 4) == 0) {
+    const char *msg = sub + 4;
+    if (cs->addMessage(msg) && cs->saveToFile()) {
+      Serial.printf("  > Added: \"%s\"\n", msg);
+    } else {
+      Serial.println("  Error: max 20 messages, max 40 chars per message");
+    }
+
+  } else if (memcmp(sub, "del ", 4) == 0) {
+    int idx = atoi(sub + 4);
+    const char *old_msg = cs->getMessage(idx);
+    char saved[41] = "";
+    if (old_msg) strncpy(saved, old_msg, 40);
+    if (cs->deleteMessage(idx) && cs->saveToFile()) {
+      Serial.printf("  > Deleted [%d]: \"%s\"\n", idx, saved);
+    } else {
+      Serial.printf("  Error: invalid index %d\n", idx);
+    }
+
+  } else if (strcmp(sub, "reload") == 0) {
+    cs->loadFromFile();
+    Serial.printf("  > Reloaded %d message(s) from /canned.txt\n", cs->getMessageCount());
+
+  } else {
+    Serial.println("  Usage:");
+    Serial.println("    canned list          -- list all messages");
+    Serial.println("    canned add <text>    -- add message (max 40 chars)");
+    Serial.println("    canned del <n>       -- delete message number n");
+    Serial.println("    canned reload        -- reload into running UI");
+  }
+}
+
 // ------------------------------------------------------------
 void CannedMessagesScreen::countMessages() {
   message_count = 0;
@@ -178,14 +269,27 @@ bool CannedMessagesScreen::isOnBackOption() {
 // Rendering
 // ------------------------------------------------------------
 int CannedMessagesScreen::render(DisplayDriver &display) {
-  if (confirm_send)
+  if (message_count == 0) {
+    renderNoMessages(display);
+  } else if (confirm_send) {
     renderConfirmSend(display);
-  else if (in_channel_selection)
+  } else if (in_channel_selection) {
     renderChannelSelection(display);
-  else
+  } else {
     renderMessageSelection(display);
+  }
 
   return 1000;
+}
+
+void CannedMessagesScreen::renderNoMessages(DisplayDriver &display) {
+  display.setColor(DisplayDriver::YELLOW);
+  display.setTextSize(1);
+  display.drawTextCentered(display.width() / 2, 16, "No messages");
+  display.setColor(DisplayDriver::GREEN);
+  display.drawTextCentered(display.width() / 2, 30, "please configure");
+  display.setColor(DisplayDriver::BLUE);
+  display.drawTextCentered(display.width() / 2, 54, "via serial CLI");
 }
 
 void CannedMessagesScreen::renderChannelSelection(DisplayDriver &display) {
@@ -358,6 +462,14 @@ void CannedMessagesScreen::renderConfirmSend(DisplayDriver &display) {
 // Input handling
 // ------------------------------------------------------------
 bool CannedMessagesScreen::handleInput(char c) {
+  // If no messages configured, any back/prev key returns to home
+  if (message_count == 0) {
+    if (c == KEY_PREV || c == KEY_ENTER) {
+      _task->gotoHomeScreen();
+      return true;
+    }
+    return false;
+  }
 
 #ifdef PIN_USER_JOYSTICK
   // ============================================================

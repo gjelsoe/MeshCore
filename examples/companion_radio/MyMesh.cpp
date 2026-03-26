@@ -3,6 +3,10 @@
 #include <Arduino.h> // needed for PlatformIO
 #include <Mesh.h>
 
+#ifdef USE_CANNED_MESSAGE
+#include "canned-ui-new/CannedMessagesScreen.h"
+#endif
+
 #define CMD_APP_START                 1
 #define CMD_SEND_TXT_MSG              2
 #define CMD_SEND_CHANNEL_TXT_MSG      3
@@ -1825,11 +1829,17 @@ void MyMesh::checkCLIRescueCmd() {
   int len = strlen(cli_command);
   while (Serial.available() && len < sizeof(cli_command)-1) {
     char c = Serial.read();
-    if (c != '\n') {
+    if (c == 0x7F || c == 0x08) {  // backspace / DEL
+      if (len > 0) {
+        len--;
+        cli_command[len] = 0;
+        Serial.print("\x08 \x08");  // erase character on terminal
+      }
+    } else if (c != '\n') {
       cli_command[len++] = c;
       cli_command[len] = 0;
+      Serial.print(c);  // echo
     }
-    Serial.print(c);  // echo
   }
   if (len == sizeof(cli_command)-1) {  // command buffer full
     cli_command[sizeof(cli_command)-1] = '\r';
@@ -1985,6 +1995,10 @@ void MyMesh::checkCLIRescueCmd() {
 
     } else if (strcmp(cli_command, "reboot") == 0) {
       board.reboot();  // doesn't return
+#ifdef USE_CANNED_MESSAGE
+    } else if (memcmp(cli_command, "canned", 6) == 0) {
+      CannedMessagesScreen::handleCLI(cli_command, _ui);
+#endif
     } else {
       Serial.println("  Error: unknown command");
     }

@@ -107,6 +107,7 @@ public:
   void gotoHomeScreen() { setCurrScreen(home); }
 #ifdef USE_CANNED_MESSAGE
   void gotoCannedMessagesScreen();
+  UIScreen *getCannedScreen() { return canned_messages; }
 #endif
 #ifdef USE_FAN_PWM
   void gotoFanSpeedScreen() { setCurrScreen(fan_speed); }
