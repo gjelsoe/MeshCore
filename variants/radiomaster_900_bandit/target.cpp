@@ -2,9 +2,11 @@
 
 #include <Arduino.h>
 #include <helpers/ui/UIScreen.h>
-#include <Adafruit_NeoPixel.h>
 
+#ifdef RADIOMASTER_900_BANDIT
+#include <Adafruit_NeoPixel.h>
 Adafruit_NeoPixel pixels(NEOPIXEL_NUM, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
+#endif
 
 BanditBoard board;
 
@@ -27,7 +29,6 @@ SensorManager sensors;
 
 #ifdef DISPLAY_CLASS
 DISPLAY_CLASS display;
-// MomentaryButton user_btn(PIN_USER_BTN, 1000, true);
 #if defined(PIN_USER_JOYSTICK)
 static AnalogJoystick::JoyADCMapping joystick_mappings[] = {
   { 0, KEY_DOWN },     { 1290, KEY_SELECT }, { 1961, KEY_LEFT },
@@ -66,12 +67,37 @@ void radio_set_params(float freq, float bw, uint8_t sf, uint8_t cr) {
   radio.setCodingRate(cr);
 }
 
+// Calibration points from manufacturer (values from Radiomaster)
+struct PowerCalibration {
+  uint8_t output_dbm;
+  int8_t sx1278_dbm;
+  uint8_t dac_value;
+};
+
+#ifdef RADIOMASTER_900_BANDIT_NANO
+static const PowerCalibration calibration[] = {
+  { 20, 2, 168 }, // 100mW
+  { 24, 6, 148 }, // 250mW
+  { 27, 9, 128 }, // 500mW
+  { 30, 12, 90 }  // 1000mW
+};
+#else
+static const PowerCalibration calibration[] = {
+  { 20, 2, 165 }, // 100mW
+  { 24, 6, 155 }, // 250mW
+  { 27, 9, 142 }, // 500mW
+  { 30, 10, 110 } // 1000mW
+};
+#endif
+
+static const int NUM_CAL_POINTS = sizeof(calibration) / sizeof(calibration[0]);
+
 /**
  * Linear interpolation helper for integers
  */
 int16_t lerp_int(uint8_t x, uint8_t x0, uint8_t x1, int16_t y0, int16_t y1) {
   if (x1 == x0) return y0;
-  return y0 + ((int16_t)(x - x0) * (y1 - y0)) / (x1 - x0);
+  return y0 + (int16_t)(((int32_t)(x - x0) * (y1 - y0)) / (x1 - x0));
 }
 
 /**

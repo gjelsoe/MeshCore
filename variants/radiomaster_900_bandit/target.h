@@ -1,7 +1,6 @@
 #pragma once
 
 #define RADIOLIB_STATIC_ONLY 1
-// #include <RadioLib.h>
 #include <BanditBoard.h>
 #include <helpers/AutoDiscoverRTCClock.h>
 #include <helpers/SensorManager.h>
@@ -10,7 +9,11 @@
 
 #ifdef DISPLAY_CLASS
 #include <helpers/ui/AnalogJoystick.h>
+#ifdef RADIOMASTER_900_BANDIT
 #include <helpers/ui/SH1115Display.h>
+#else
+#include <helpers/ui/SSD1306Display.h>
+#endif
 #endif
 
 extern BanditBoard board;

@@ -1,18 +1,10 @@
 #include "SH1115Display.h"
 #include <Adafruit_GrayOLED.h>
-//#include "Adafruit_SH110X.h"
 #include <Adafruit_SH1115.h>
-
-bool SH1115Display::i2c_probe(TwoWire &wire, uint8_t addr)
-{
-  wire.beginTransmission(addr);
-  uint8_t error = wire.endTransmission();
-  return (error == 0);
-}
 
 bool SH1115Display::begin()
 {
-  return display.begin(DISPLAY_ADDRESS, true) && i2c_probe(Wire, DISPLAY_ADDRESS);
+  return display.begin(DISPLAY_ADDRESS, true);
 }
 
 void SH1115Display::turnOn()

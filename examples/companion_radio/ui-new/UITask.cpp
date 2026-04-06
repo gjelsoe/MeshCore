@@ -687,6 +687,8 @@ void UITask::userLedHandler() {
 
 #ifdef RADIOMASTER_900_BANDIT
 void UITask::neopixelMsgHandler() {
+  if (board.tx_active) return; // Don't overwrite TX flash
+
   unsigned long cur_time = millis();
 
   if (_msgcount > 0) {
@@ -954,12 +956,6 @@ char UITask::checkDisplayOn(char c) {
     if (!_display->isOn()) {
       _display->turnOn();   // turn display on and consume event
       c = 0;
-#ifdef RADIOMASTER_900_BANDIT
-// Restore backlight for buttons here.
-//      pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-//      pixels.setPixelColor(1, pixels.Color(0, 255, 0));
-//      pixels.show();
-#endif
     }
     _auto_off = millis() + AUTO_OFF_MILLIS;   // extend auto-off timer
     _next_refresh = 0;  // trigger refresh
