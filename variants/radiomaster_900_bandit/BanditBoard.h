@@ -110,16 +110,28 @@ public:
 
   const char *getManufacturerName() const override { return "RadioMaster Bandit"; }
 
+  // Add wake-enabled power off
+  void powerOff() override {
+#if defined(PIN_USER_BTN)
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_USER_BTN, LOW); // Wake when button pressed (LOW)
+#elif defined(PIN_USER_JOYSTICK)
+    // For analog joystick, you'd need to use the center button GPIO
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_USER_JOYSTICK, LOW);
+#endif
+    // Enter deep sleep
+    esp_deep_sleep_start();
+  }
+
   void onBeforeTransmit() override {
     // Use user-defined TX LED color
-    for (byte i = 2; i <= 6; i++) {
+    for (byte i = 2; i < NEOPIXEL_NUM; i++) {
       pixels.setPixelColor(i, pixels.Color(TX_LED_RED, TX_LED_GREEN, TX_LED_BLUE));
     }
     pixels.show();
   }
 
   void onAfterTransmit() override {
-    for (byte i = 2; i <= 6; i++) {
+    for (byte i = 2; i < NEOPIXEL_NUM; i++) {
       pixels.setPixelColor(i, pixels.Color(0, 0, 0));
     }
     pixels.show();

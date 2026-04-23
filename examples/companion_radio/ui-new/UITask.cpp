@@ -42,11 +42,11 @@
 #endif
 
 #ifndef UI_RECENT_LIST_SIZE
-#define UI_RECENT_LIST_SIZE 4
+  #define UI_RECENT_LIST_SIZE 4
 #endif
 
 #if defined(UI_HAS_JOYSTICK) || defined(PIN_USER_JOYSTICK)
-#define PRESS_LABEL "press Enter"
+  #define PRESS_LABEL "press Enter"
 #else
 #define PRESS_LABEL "long press"
 #endif
@@ -124,8 +124,14 @@ class HomeScreen : public UIScreen {
 
   void renderBatteryIndicator(DisplayDriver &display, uint16_t batteryMilliVolts) {
     // Convert millivolts to percentage
-    const int minMilliVolts = 3000; // Minimum voltage (e.g., 3.0V)
-    const int maxMilliVolts = 4200; // Maximum voltage (e.g., 4.2V)
+#ifndef BATT_MIN_MILLIVOLTS
+  #define BATT_MIN_MILLIVOLTS 3000
+#endif
+#ifndef BATT_MAX_MILLIVOLTS
+  #define BATT_MAX_MILLIVOLTS 4200
+#endif
+    const int minMilliVolts = BATT_MIN_MILLIVOLTS;
+    const int maxMilliVolts = BATT_MAX_MILLIVOLTS;
     int batteryPercentage = ((batteryMilliVolts - minMilliVolts) * 100) / (maxMilliVolts - minMilliVolts);
     if (batteryPercentage < 0) batteryPercentage = 0;     // Clamp to 0%
     if (batteryPercentage > 100) batteryPercentage = 100; // Clamp to 100%
@@ -146,6 +152,14 @@ class HomeScreen : public UIScreen {
     // fill the battery based on the percentage
     int fillWidth = (batteryPercentage * (iconWidth - 4)) / 100;
     display.fillRect(iconX + 2, iconY + 2, fillWidth, iconHeight - 4);
+
+    // show muted icon if buzzer is muted
+#ifdef PIN_BUZZER
+    if (_task->isBuzzerQuiet()) {
+      display.setColor(DisplayDriver::RED);
+      display.drawXbm(iconX - 9, iconY + 1, muted_icon, 8, 8);
+    }
+#endif
   }
 
   CayenneLPP sensors_lpp;
@@ -480,15 +494,17 @@ class MsgPreviewScreen : public UIScreen {
   };
 #define MAX_UNREAD_MSGS 32
   int num_unread;
+  int head = MAX_UNREAD_MSGS - 1; // index of latest unread message
   MsgEntry unread[MAX_UNREAD_MSGS];
 
 public:
   MsgPreviewScreen(UITask *task, mesh::RTCClock *rtc) : _task(task), _rtc(rtc) { num_unread = 0; }
 
-  void addPreview(uint8_t path_len, const char *from_name, const char *msg) {
-    if (num_unread >= MAX_UNREAD_MSGS) return; // full
+  void addPreview(uint8_t path_len, const char* from_name, const char* msg) {
+    head = (head + 1) % MAX_UNREAD_MSGS;
+    if (num_unread < MAX_UNREAD_MSGS) num_unread++;
 
-    auto p = &unread[num_unread++];
+    auto p = &unread[head];
     p->timestamp = _rtc->getCurrentTime();
     if (path_len == 0xFF) {
       sprintf(p->origin, "(D) %s:", from_name);
@@ -506,7 +522,7 @@ public:
     sprintf(tmp, "Unread: %d", num_unread);
     display.print(tmp);
 
-    auto p = &unread[0];
+    auto p = &unread[head];
 
     int secs = _rtc->getCurrentTime() - p->timestamp;
     if (secs < 60) {
@@ -542,14 +558,10 @@ public:
 
   bool handleInput(char c) override {
     if (c == KEY_NEXT || c == KEY_RIGHT) {
+      head = (head + MAX_UNREAD_MSGS - 1) % MAX_UNREAD_MSGS;
       num_unread--;
       if (num_unread == 0) {
         _task->gotoHomeScreen();
-      } else {
-        // delete first/curr item from unread queue
-        for (int i = 0; i < num_unread; i++) {
-          unread[i] = unread[i + 1];
-        }
       }
       return true;
     }
@@ -578,18 +590,6 @@ void UITask::begin(DisplayDriver *display, SensorManager *sensors, NodePrefs *no
 #endif
 
   _node_prefs = node_prefs;
-
-#if ENV_INCLUDE_GPS == 1
-  // Apply GPS preferences from stored prefs
-  if (_sensors != NULL && _node_prefs != NULL) {
-    _sensors->setSettingValue("gps", _node_prefs->gps_enabled ? "1" : "0");
-    if (_node_prefs->gps_interval > 0) {
-      char interval_str[12];  // Max: 24 hours = 86400 seconds (5 digits + null)
-      sprintf(interval_str, "%u", _node_prefs->gps_interval);
-      _sensors->setSettingValue("gps_interval", interval_str);
-    }
-  }
-#endif
 
   if (_display != NULL) {
     _display->turnOn();
@@ -722,7 +722,7 @@ void UITask::neopixelMsgHandler() {
       uint8_t g = (NEOPIXEL_MSG_GREEN * neopixel_brightness) / NEOPIXEL_MAX_BRIGHTNESS;
       uint8_t b = (NEOPIXEL_MSG_BLUE * neopixel_brightness) / NEOPIXEL_MAX_BRIGHTNESS;
 
-      for (int i = 2; i <= 6; i++) {
+      for (int i = 2; i < NEOPIXEL_NUM; i++) {
         pixels.setPixelColor(i, pixels.Color(r, g, b));
       }
       pixels.show();
@@ -735,7 +735,7 @@ void UITask::neopixelMsgHandler() {
     if (neopixel_brightness > 0) {
       neopixel_brightness = 0;
       neopixel_brightness_increasing = true;
-      for (int i = 2; i <= 6; i++) {
+      for (int i = 2; i < NEOPIXEL_NUM; i++) {
         pixels.setPixelColor(i, pixels.Color(0, 0, 0));
       }
       pixels.show();
@@ -744,7 +744,7 @@ void UITask::neopixelMsgHandler() {
 }
 #endif
 
-void UITask::setCurrScreen(UIScreen *c) {
+void UITask::setCurrScreen(UIScreen* c) {
   curr = c;
   _next_refresh = 100;
 }
@@ -961,6 +961,7 @@ char UITask::checkDisplayOn(char c) {
       _display->turnOn(); // turn display on and consume event
       c = 0;
 #ifdef RADIOMASTER_900_BANDIT
+// Restore backlight for buttons here.
 //      pixels.setPixelColor(0, pixels.Color(255, 0, 0));
 //      pixels.setPixelColor(1, pixels.Color(0, 255, 0));
 //      pixels.show();
