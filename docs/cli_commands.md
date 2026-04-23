@@ -100,7 +100,9 @@
 - `neighbor.remove <pubkey_prefix>`
 
 **Parameters:** 
-- `pubkey_prefix`: The public key of the node to remove from the neighbors list
+- `pubkey_prefix`: The public key of the node to remove from the neighbors list. This can be a short prefix or the full key. All neighbors matching the provided prefix will be removed.
+
+**Note:** You can remove all neighbors by sending a space character as the prefix. The space indicates an empty prefix, which matches all existing neighbors.
 
 ---
 
@@ -212,6 +214,20 @@
 **Default:** Varies by board
 
 **Notes:** This setting only controls the power level of the LoRa chip. Some nodes have an additional power amplifier stage which increases the total output. Refer to the node's manual for the correct setting to use. **Setting a value too high may violate the laws in your country.**
+
+---
+
+#### View or change the boosted receive gain mode
+**Usage:**
+- `get radio.rxgain`
+- `set radio.rxgain <state>`
+
+**Parameters:**
+- `state`: `on`|`off`
+
+**Default:** `off`
+
+**Note:** Only available on SX1262 and SX1268 based boards.
 
 ---
 
@@ -555,7 +571,7 @@
 - `set agc.reset.interval <value>`
 
 **Parameters:**
-- `value`: Interval in seconds rounded down to a multiple of 4 (17 becomes 16)
+- `value`: Interval in seconds rounded down to a multiple of 4 (17 becomes 16). 0 to disable.
 
 **Default:** `0.0`
 
@@ -712,6 +728,16 @@
 
 ---
 
+#### View or change the default scope region for this node
+**Usage:** 
+- `region default`
+- `region default {name|<null>}`
+
+**Parameters:**
+- `name`: Region name,  or <null> to reset/clear
+
+---
+
 #### Create a new region
 **Usage:** 
 - `region put <name> [parent_name]`
@@ -854,7 +880,9 @@ region save
 
 **Default:** `off`
 
-**Note:** Output format: `{status}, {fix}, {sat count}` (when enabled)
+**Note:** Output format:
+- `off` when the GPS hardware is disabled
+- `on, {active|deactivated}, {fix|no fix}, {sat count} sats` when the GPS hardware is enabled
 
 ---
 
