@@ -4,8 +4,6 @@
 #include "MeshCore.h"
 
 class CustomLR1110 : public LR1110 {
-  bool _rx_boosted = false;
-
   public:
     CustomLR1110(Module *mod) : LR1110(mod) { }
 
@@ -22,15 +20,6 @@ class CustomLR1110 : public LR1110 {
       return len;
     }
     
-    float getFreqMHz() const { return freqMHz; }
-
-    int16_t setRxBoostedGainMode(bool en) {
-      _rx_boosted = en;
-      return LR1110::setRxBoostedGainMode(en);
-    }
-
-    bool getRxBoostedGainMode() const { return _rx_boosted; }
-
     bool isReceiving() {
       uint16_t irq = getIrqStatus();
       bool detected = ((irq & RADIOLIB_LR11X0_IRQ_SYNC_WORD_HEADER_VALID) || (irq & RADIOLIB_LR11X0_IRQ_PREAMBLE_DETECTED));

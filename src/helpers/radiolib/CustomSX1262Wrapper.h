@@ -2,11 +2,6 @@
 
 #include "CustomSX1262.h"
 #include "RadioLibWrappers.h"
-#include "SX126xReset.h"
-
-#ifndef USE_SX1262
-#define USE_SX1262
-#endif
 
 class CustomSX1262Wrapper : public RadioLibWrapper {
 public:
@@ -26,14 +21,5 @@ public:
   }
   virtual void powerOff() override {
     ((CustomSX1262 *)_radio)->sleep(false);
-  }
-
-  void doResetAGC() override { sx126xResetAGC((SX126x *)_radio); }
-
-  void setRxBoostedGainMode(bool en) override {
-    ((CustomSX1262 *)_radio)->setRxBoostedGainMode(en);
-  }
-  bool getRxBoostedGainMode() const override {
-    return ((CustomSX1262 *)_radio)->getRxBoostedGainMode();
   }
 };

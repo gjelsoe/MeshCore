@@ -10,13 +10,8 @@
 #define Y_OFFSET 1  // Vertical offset to prevent top row cutoff
 #endif
 
-#ifdef HELTEC_VISION_MASTER_T190
-  #define SCALE_X  2.5f        // 320 / 128
-  #define SCALE_Y  2.65625f    // 170 / 64
-#else
-  #define SCALE_X  1.875f      // 240 / 128
-  #define SCALE_Y  2.109375f   // 135 / 64
-#endif
+#define SCALE_X  1.875f     // 240 / 128
+#define SCALE_Y  2.109375f   // 135 / 64
 
 bool ST7789Display::begin() {
   if(!_isOn) {

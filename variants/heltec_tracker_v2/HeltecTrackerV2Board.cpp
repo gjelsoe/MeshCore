@@ -6,14 +6,18 @@ void HeltecTrackerV2Board::begin() {
     pinMode(PIN_ADC_CTRL, OUTPUT);
     digitalWrite(PIN_ADC_CTRL, LOW); // Initially inactive
 
-    loRaFEMControl.init();
+    pinMode(P_LORA_PA_POWER, OUTPUT);
+    digitalWrite(P_LORA_PA_POWER,HIGH);
 
-    esp_reset_reason_t reason = esp_reset_reason();
-    if (reason != ESP_RST_DEEPSLEEP) {
-      delay(1);  // GC1109 startup time after cold power-on
-    }
+    rtc_gpio_hold_dis((gpio_num_t)P_LORA_PA_EN);
+    pinMode(P_LORA_PA_EN, OUTPUT);
+    digitalWrite(P_LORA_PA_EN,HIGH);
+    pinMode(P_LORA_PA_TX_EN, OUTPUT);
+    digitalWrite(P_LORA_PA_TX_EN,LOW);
 
     periph_power.begin();
+
+    esp_reset_reason_t reason = esp_reset_reason();
     if (reason == ESP_RST_DEEPSLEEP) {
       long wakeup_source = esp_sleep_get_ext1_wakeup_status();
       if (wakeup_source & (1 << P_LORA_DIO_1)) {  // received a LoRa packet (while in deep sleep)
@@ -27,12 +31,12 @@ void HeltecTrackerV2Board::begin() {
 
   void HeltecTrackerV2Board::onBeforeTransmit(void) {
     digitalWrite(P_LORA_TX_LED, HIGH);   // turn TX LED on
-    loRaFEMControl.setTxModeEnable();
+    digitalWrite(P_LORA_PA_TX_EN,HIGH);
   }
 
   void HeltecTrackerV2Board::onAfterTransmit(void) {
     digitalWrite(P_LORA_TX_LED, LOW);   // turn TX LED off
-    loRaFEMControl.setRxModeEnable();
+    digitalWrite(P_LORA_PA_TX_EN,LOW);
   }
 
   void HeltecTrackerV2Board::enterDeepSleep(uint32_t secs, int pin_wake_btn) {
@@ -44,7 +48,7 @@ void HeltecTrackerV2Board::begin() {
 
     rtc_gpio_hold_en((gpio_num_t)P_LORA_NSS);
 
-    loRaFEMControl.setRxModeEnableWhenMCUSleep();//It also needs to be enabled in receive mode
+    rtc_gpio_hold_en((gpio_num_t)P_LORA_PA_EN); //It also needs to be enabled in receive mode
 
     if (pin_wake_btn < 0) {
       esp_sleep_enable_ext1_wakeup( (1L << P_LORA_DIO_1), ESP_EXT1_WAKEUP_ANY_HIGH);  // wake up on: recv LoRa packet

@@ -72,7 +72,7 @@ int16_t lerp_int(uint8_t x, uint8_t x0, uint8_t x1, int16_t y0, int16_t y1) {
 }
 
 /**
- * Set PA output power with automatic SX1276 and DAC calculation
+ * Set PA output power with automatic SX1278 and DAC calculation
  *
  * @param target_output_dbm Desired PA output power in dBm (20-30 dBm for 100-1000mW)
  * @param clamp_to_range If true, clamp out-of-range values to min/max instead of failing
