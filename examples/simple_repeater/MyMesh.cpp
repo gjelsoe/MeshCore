@@ -1022,6 +1022,10 @@ void MyMesh::begin(FILESYSTEM *fs) {
 
   board.setAdcMultiplier(_prefs.adc_multiplier);
 
+  _scriptLoad();
+  _nextScriptEval = futureMillis(60000UL);  // first evaluation after 60s
+  _nextBootMsg    = futureMillis(15000UL);  // boot message after 15s
+
 #if ENV_INCLUDE_GPS == 1
   applyGpsPrefs();
 #endif
@@ -1443,6 +1447,10 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char *
       sendNodeDiscoverReq();
       strcpy(reply, "OK - Discover sent");
     }
+  } else if (memcmp(command, "report", 6) == 0) {
+    const char* arg = command + 6;
+    while (*arg == ' ') arg++;
+    scriptHandleCommand(arg, reply, sender);
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
@@ -1483,6 +1491,24 @@ void MyMesh::loop() {
     MESH_DEBUG_PRINTLN("Radio params restored");
   }
 
+  // report engine: send boot message once after startup delay
+  if (_nextBootMsg && millisHasNowPassed(_nextBootMsg)) {
+    _nextBootMsg = 0;
+    _scriptSendBootMessage();
+  }
+
+  // report engine: deferred SPIFFS save
+  if (_scriptRulesDirty) {
+    _scriptRulesDirty = false;
+    _scriptSave();
+  }
+
+  // report engine: evaluate rules every minute
+  if (_nextScriptEval && millisHasNowPassed(_nextScriptEval)) {
+    _nextScriptEval = futureMillis(60000UL);
+    _scriptEvaluate();
+  }
+
   // is pending dirty contacts write needed?
   if (dirty_contacts_expiry && millisHasNowPassed(dirty_contacts_expiry)) {
     acl.save(_fs);
@@ -1494,6 +1520,10 @@ void MyMesh::loop() {
   uptime_millis += now - last_millis;
   last_millis = now;
 }
+
+// Report engine implementation — included here so it can access MyMesh private members.
+// Must remain at the bottom of this file, after the full class definition.
+#include "ReportEngine.cpp"
 
 // To check if there is pending work
 bool MyMesh::hasPendingWork() const {

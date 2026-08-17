@@ -36,6 +36,7 @@
 #include <helpers/RegionMap.h>
 #include <helpers/RoutingPolicy.h>
 #include "RateLimiter.h"
+#include "ReportEngine.h"
 
 #ifdef WITH_BRIDGE
 extern AbstractBridge* bridge;
@@ -130,6 +131,21 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 
   File openAppend(const char* fname);
   bool isLooped(const mesh::Packet* packet, const uint8_t max_counters[]);
+
+  // ── Report engine ─────────────────────────────────────────────────────────
+  ScriptRule    _scriptRules[MAX_SCRIPT_RULES];
+  uint8_t       _scriptRuleCount  = 0;
+  unsigned long _nextScriptEval   = 0;
+  bool          _scriptRulesDirty = false;
+  BootConfig    _bootConfig       = {};
+  DmConfig      _dmConfig         = {};
+  unsigned long _nextBootMsg      = 0;
+
+  void _scriptLoad();
+  void _scriptSave();
+  void _scriptSendMessage(const ScriptRule& rule, const char* text);
+  void _scriptSendBootMessage();
+  void _scriptEvaluate();
 
 protected:
   float getAirtimeBudgetFactor() const override {
@@ -237,6 +253,7 @@ public:
   // Outpath PR
   void handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char* command, char* reply);
   void loop();
+  void scriptHandleCommand(const char* arg, char* reply, ClientInfo* sender = nullptr);
 
 #if defined(WITH_BRIDGE)
   void setBridgeState(bool enable) override {
