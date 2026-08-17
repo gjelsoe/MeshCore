@@ -168,6 +168,13 @@ protected:
 
 #if ENV_INCLUDE_GPS == 1
   void applyGpsPrefs() {
+    // If powersaving on, apply powersaving to sensors
+    if (_prefs.powersaving_enabled) {
+      sensors.powersaving_enabled = true;
+    } else {
+      sensors.powersaving_enabled = false;
+    }
+
     sensors.setSettingValue("gps", _prefs.gps_enabled?"1":"0");
   }
 #endif
@@ -229,4 +236,7 @@ public:
   void clearStats() override;
   void handleCommand(uint32_t sender_timestamp, char* command, char* reply);
   void loop();
+
+  // To check if there is pending work
+  bool hasPendingWork() const;
 };

@@ -277,6 +277,38 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 
 ---
 
+#### View or change RX duty-cycle power saving
+**Usage:**
+- `get radio.rxps`
+- `get radio.rxps.rfrx_disabled`
+- `get rxps.wd`
+- `set radio.rxps.rfrx_disabled <state>`
+- `set radio.rxps off`
+- `set radio.rxps on`
+- `set radio.rxps conservative`
+- `set radio.rxps balanced`
+- `set radio.rxps <1-10>`
+- `set radio.rxps level <1-10>`
+- `set radio.rxps level <1-10> preamble <16|32>`
+- `set radio.rxps <rx_us> <sleep_us>`
+
+**Parameters:**
+- `rx_us`, `sleep_us`: Receive and sleep durations in microseconds (`1000`-`30000000`).
+- `level`: A power-saving level from `1` (most conservative) to `10` (least power saving).
+- `preamble`: LoRa preamble length in symbols; `16` or `32`.
+- `state`: `on` or `off`.
+
+**Notes:**
+- `get rxps.wd` reports the RXPS watchdog's soft and hard recovery counts.
+- `radio.rxps.rfrx_disabled` is a runtime-only diagnostic setting and resets to `off` after reboot.
+- Its default `off` state keeps the host-controlled SX1262 receive path enabled during RX duty-cycle mode. Setting it to `on` reproduces the old missing-RF_RX behavior and can significantly reduce receive sensitivity, making remote commands harder to receive.
+- `radio.rxps.rfrx_disabled` is supported only on SX1262 targets with a host-controlled RX enable pin.
+- `on` and `conservative` select level `1` with a 16-symbol preamble; `balanced` selects level `5` with a 16-symbol preamble.
+- Level-based settings automatically recalculate their timings when the spreading factor or bandwidth changes. Custom `<rx_us> <sleep_us>` timings remain fixed.
+- The selected mode is applied immediately, persisted, and restored after reboot.
+
+---
+
 #### View or change the LoRa FEM receive-path gain state on supported boards
 **Usage:**
 - `get radio.fem.rxgain`
@@ -304,6 +336,72 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 - On Station G3, remove the PA PL1 jumper to allow software control. `on` selects PA PL1 high/short and `off` selects PA PL1 low/open. The PA PL2 hardware jumper determines whether this switches between power levels 1/3 or 2/4.
 - Select an operating level and SX1262 transmit power that comply with local RF limits and the Station G3 power-supply requirements.
 - The setting is saved immediately, but on Station G3 the level is applied to the hardware at the start of the next transmit, so that the PA supply rail is never re-targeted while the PA is being driven. `get` reports the configured state, which may lead the hardware until the node next transmits.
+
+---
+
+#### View or change RX power saving
+**Usage:**
+- `get radio.rxps`
+- `set radio.rxps off`
+- `set radio.rxps on`
+- `set radio.rxps conservative`
+- `set radio.rxps balanced`
+- `set radio.rxps <level>`
+- `set radio.rxps level <level>`
+- `set radio.rxps level <level> preamble <symbols>`
+- `set radio.rxps <rx_us> <sleep_us>`
+
+**Parameters:**
+- `level`: `1-10`; higher levels use shorter receive windows and longer sleep windows.
+- `symbols`: `16` or `32` preamble symbols.
+- `rx_us`: receive-window duration in microseconds, `1000-30000000`.
+- `sleep_us`: radio sleep duration in microseconds, `1000-30000000`.
+
+**Repeater default:** `off`
+
+**Profiles:**
+- `on` and `conservative`: level 1 with a 16-symbol preamble.
+- `balanced`: level 5 with a 16-symbol preamble.
+- A numeric level, or `level <level>`, automatically uses 32 preamble symbols for SF5-SF8 and 16 for SF9-SF12.
+- `level <level> preamble <symbols>` explicitly fixes the preamble used in the calculation.
+- Explicit `rx_us sleep_us` values select manual timing (`level=0`).
+
+Level-based settings are recalculated after SF or bandwidth changes. Manual timings are not recalculated. Settings are persisted in `/prefs.json`. Companion firmware does not expose this text command and applies its fixed level 5 / preamble 16 profile at startup and after radio-parameter changes.
+
+`get radio.rxps` reports:
+
+```text
+desired=<on|off>,effective=<armed|continuous>,supported=<yes|no>,
+level=<0-10>,preamble=<0|16|32>,rx=<us>,sleep=<us>,
+err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
+```
+
+- `desired` is the saved user setting.
+- `effective=armed` means receive duty-cycle is active.
+- `effective=continuous` means RXPS is disabled, unsupported, or the last arm attempt fell back to continuous RX.
+- `fail` counts failed arm operations; each one falls back to continuous RX. `clear stats` resets both this total and the consecutive-failure backoff, granting three fresh arm attempts.
+- `erx` and `eslp` appear only when the driver had to clamp the requested periods, and report the effective periods after driver clamping. On LR1110 the RX window is stretched when `2*rx + sleep` would not cover the extended period Semtech requires, so the real duty cycle can be less economical than `rx`/`sleep` suggest.
+- RXPS is currently supported by the SX1262 and LR1110 wrappers. Other radios remain in continuous RX and reject attempts to enable RXPS.
+- There is intentionally no RXPS watchdog, watchdog command, or periodic recovery. Recovery is limited to the immediate continuous-RX fallback after an arm error. After 3 consecutive arm failures the node stops retrying on every RX restart and stays in continuous RX until the RXPS configuration is set again or `clear stats` grants a fresh set of attempts.
+- On boards with a host-controlled RXEN pin, the RF switch is held in receive mode for the whole duty cycle (otherwise the node would be deaf). An external LNA on that pin therefore stays biased during the sleep windows, so the real power saving is smaller than the `rx`/`sleep` ratio implies.
+
+---
+
+#### Disable the host-controlled RF receive switch during RX power saving
+**Usage:**
+- `get radio.rxps.rfrx_disabled`
+- `set radio.rxps.rfrx_disabled <state>`
+
+**Parameters:**
+- `state`: `on`|`off`
+
+**Default:** `off`
+
+**Notes:**
+- This is a runtime-only diagnostic setting and resets to `off` after reboot.
+- `on` reproduces the missing RF_RX assertion during SX1262 receive duty-cycle mode.
+- Supported only on SX1262 targets with a host-controlled RX enable pin.
+- Enabling it can significantly reduce receive sensitivity and make remote commands harder to receive.
 
 ---
 
@@ -458,6 +556,18 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 **Default:** `off`
 
 **Note:** When enabled, device enters sleep mode between radio transmissions
+
+---
+
+#### View or set reboot interval (Repeater and room server)
+**Usage:**
+- `get reboot.interval`
+- `set reboot.interval <hours>`
+
+**Parameters:** 
+- `hours`: 0-255. 0 is disabled
+
+**Default:** `0` (disabled)
 
 ---
 
@@ -818,6 +928,27 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 
 **Parameters:**
 - `name`: Region name,  or <null> to reset/clear
+
+---
+
+#### View or set the direct path override for the current remote client
+**Usage:**
+- `get outpath`
+- `set outpath <hop1_hex,hop2_hex,...>`
+- `set outpath direct`
+- `set outpath clear`
+- `set outpath flood`
+
+**Parameters:**
+- `hopN_hex`: Hop hash, `2`, `4`, or `6` hex characters. All hops must use the same width.
+
+**Notes:**
+- These commands require remote client context (they target the caller's ACL entry).
+- The path hash size is inferred from the hop hash width.
+- `outpath` overrides the primary direct route used for replies to the caller.
+- `direct` sets a zero-hop direct route for a caller reachable without repeaters.
+- `clear` forgets the current direct path and allows normal path discovery to repopulate it.
+- `flood` forces replies to use flood packets until the client logs in again.
 
 ---
 

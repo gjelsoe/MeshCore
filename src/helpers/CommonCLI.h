@@ -6,6 +6,7 @@
 #include <helpers/ClientACL.h>
 #include <helpers/RegionMap.h>
 #include <helpers/ConfigSerializer.h>
+#include <helpers/radiolib/RXPowerSaving.h>
 
 #if defined(WITH_RS232_BRIDGE) || defined(WITH_ESPNOW_BRIDGE)
 #define WITH_BRIDGE
@@ -56,6 +57,7 @@ public:
   char bridge_secret[16]; // for XOR encryption of bridge packets (ESP-NOW only)
   // Power setting
   uint8_t powersaving_enabled = 0; // boolean
+  uint8_t reboot_interval = 0; // hours, 0-255 (default 0=disable)
   // Gps settings
   uint8_t gps_enabled = 0;
   uint32_t gps_interval = 0; // in seconds
@@ -70,6 +72,7 @@ public:
   uint8_t loop_detect = 0;
   uint8_t cad_enabled = 0;      // hardware Channel Activity Detection before TX (boolean)
   uint8_t extra_sf[4];
+  RxPowerSavingConfig rxps;
 
 private:
   class RadioPrefs : public ConfigSerializer {
@@ -93,6 +96,11 @@ private:
       def("agc_int", _parent->agc_reset_interval);
       def("hash_mode", _parent->path_hash_mode);
       def("multi_ack", _parent->multi_acks);
+      def("rxps_en", _parent->rxps.enabled);
+      def("rxps_rx_us", _parent->rxps.rx_us);
+      def("rxps_sleep_us", _parent->rxps.sleep_us);
+      def("rxps_level", _parent->rxps.level);
+      def("rxps_preamble", _parent->rxps.preamble);
     }
   public:
     RadioPrefs(NodePrefs* parent) : _parent(parent) { }
@@ -134,6 +142,7 @@ private:
     void structure() override {
       def("adc_mult", _parent->adc_multiplier);
       def("pwr_sav_en", _parent->powersaving_enabled);
+      def("pwr_reboot_int", _parent->reboot_interval);
     }
   public:
     PowerPrefs(NodePrefs* parent) : _parent(parent) { }
@@ -253,6 +262,7 @@ class CommonCLI {
   mesh::RTCClock* _rtc;
   NodePrefs* _prefs;
   CommonCLICallbacks* _callbacks;
+  RxPowerSavingControl* _rxps_control;
   mesh::MainBoard* _board;
   SensorManager* _sensors;
   RegionMap* _region_map;
@@ -268,8 +278,11 @@ class CommonCLI {
   void handleSetCmd(uint32_t sender_timestamp, char* command, char* reply);
 
 public:
-  CommonCLI(mesh::MainBoard& board, mesh::RTCClock& rtc, SensorManager& sensors, RegionMap& region_map, ClientACL& acl, NodePrefs* prefs, CommonCLICallbacks* callbacks)
-      : _board(&board), _rtc(&rtc), _sensors(&sensors), _region_map(&region_map), _acl(&acl), _prefs(prefs), _callbacks(callbacks) { }
+  CommonCLI(mesh::MainBoard& board, mesh::RTCClock& rtc, SensorManager& sensors,
+            RegionMap& region_map, ClientACL& acl, NodePrefs* prefs,
+            CommonCLICallbacks* callbacks, RxPowerSavingControl* rxps_control = nullptr)
+      : _rtc(&rtc), _prefs(prefs), _callbacks(callbacks), _rxps_control(rxps_control),
+        _board(&board), _sensors(&sensors), _region_map(&region_map), _acl(&acl) { }
 
   void loadPrefs(FILESYSTEM* _fs);
   bool savePrefs(FILESYSTEM* _fs);
