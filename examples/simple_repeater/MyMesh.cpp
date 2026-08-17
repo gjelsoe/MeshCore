@@ -364,7 +364,7 @@ int MyMesh::handleRequest(ClientInfo *sender, uint32_t sender_timestamp, uint8_t
       int results_offset = 0;
       uint8_t results_buffer[130];
       for(int index = 0; index < count && index + offset < neighbours_count; index++){
-        
+
         // stop if we can't fit another entry in results
         int entry_size = pubkey_prefix_length + 4 + 1;
         if(results_offset + entry_size > sizeof(results_buffer)){
@@ -587,7 +587,15 @@ mesh::DispatcherAction MyMesh::onRecvPacket(mesh::Packet* pkt) {
     }
   } else {
     recv_pkt_region = NULL;
+
   }
+
+  // Run packet through filter engine
+  if (_filter.evaluate(pkt, (int16_t)_radio->getLastRSSI())) {
+    MESH_DEBUG_PRINTLN("*** FILTER: packet dropped ***");
+    return ACTION_RELEASE;
+  }
+
   return Mesh::onRecvPacket(pkt);
 }
 
@@ -980,6 +988,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
   acl.load(_fs, self_id);
   // TODO: key_store.begin();
   region_map.load(_fs);
+  _filter.load(*_fs);
 
   // establish default-scope
   {
@@ -1203,7 +1212,7 @@ void MyMesh::formatRadioStatsReply(char *reply) {
 }
 
 void MyMesh::formatPacketStatsReply(char *reply) {
-  StatsFormatHelper::formatPacketStats(reply, radio_driver, getNumSentFlood(), getNumSentDirect(), 
+  StatsFormatHelper::formatPacketStats(reply, radio_driver, getNumSentFlood(), getNumSentDirect(),
                                        getNumRecvFlood(), getNumRecvDirect());
 }
 
@@ -1443,6 +1452,9 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char *
       sendNodeDiscoverReq();
       strcpy(reply, "OK - Discover sent");
     }
+  } else if (strncmp(command, "filter", 6) == 0 && (command[6] == ' ' || command[6] == '\0')) {
+    const char* filter_args = (command[6] == ' ') ? command + 7 : "";
+    _filter.handleCommand(filter_args, reply, *_fs, sender);
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
