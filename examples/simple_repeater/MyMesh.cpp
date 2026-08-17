@@ -1521,10 +1521,6 @@ void MyMesh::loop() {
   last_millis = now;
 }
 
-// Report engine implementation — included here so it can access MyMesh private members.
-// Must remain at the bottom of this file, after the full class definition.
-#include "ReportEngine.cpp"
-
 // To check if there is pending work
 bool MyMesh::hasPendingWork() const {
 #if defined(WITH_BRIDGE)
