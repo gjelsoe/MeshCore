@@ -248,16 +248,11 @@ void setup() {
 
   board.onBootComplete();
 
-#ifdef ESP32_PLATFORM
-#if !CONFIG_IDF_TARGET_ESP32C6
-  // Enable BLE sleep
-  esp_err_t errBLESleep = esp_bt_sleep_enable();
-  if (errBLESleep == ESP_OK) {
-    Serial.println("Bluetooth sleep enabled successfully");
-  } else {
-    Serial.printf("Bluetooth sleep enable failed: %s\n", esp_err_to_name(errBLESleep));
-  }
-#endif
+#if defined(ESP32_PLATFORM)
+  #if defined(BLE_PIN_CODE) && !CONFIG_IDF_TARGET_ESP32C6
+    // Enable BLE sleep
+    esp_bt_sleep_enable();
+  #endif
 
 #if CONFIG_IDF_TARGET_ESP32C3
   esp_pm_config_esp32c3_t pm_config;
@@ -270,7 +265,13 @@ void setup() {
 #endif
 
   // Configure Power Management
+#if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
+  // Disable automatic light sleep for USB CDC Serial
+  pm_config = { .max_freq_mhz = 80, .min_freq_mhz = 40, .light_sleep_enable = false };
+#else
   pm_config = { .max_freq_mhz = 80, .min_freq_mhz = 40, .light_sleep_enable = true };
+#endif
+
   esp_err_t errPM = esp_pm_configure(&pm_config);
   if (errPM == ESP_OK) {
     Serial.println("Power Management configured successfully");
@@ -296,11 +297,13 @@ void loop() {
 #if defined(NRF52_PLATFORM)
     board.sleep(0); // nrf ignores seconds param, sleeps whenever possible
 #elif defined(ESP32_PLATFORM)
-#if defined(BLE_PIN_CODE)
+  #if defined(BLE_PIN_CODE)
     if (!bluetooth_interface.isReadBusy() && !bluetooth_interface.isWriteBusy()) { // BLE is not busy
-      vTaskDelay(pdMS_TO_TICKS(10));  // attempt to sleep
+      vTaskDelay(pdMS_TO_TICKS(10)); // attempt to sleep
     }
-#endif
+  #elif defined(ENABLE_USB_INTERFACE)
+    vTaskDelay(pdMS_TO_TICKS(10)); // attempt to sleep
+  #endif
 #endif
   }
 
