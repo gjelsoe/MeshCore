@@ -92,10 +92,10 @@ public:
 };
 
 #if BLE_DEBUG_LOGGING && ARDUINO
-  #include <Arduino.h>
-  #define BLE_DEBUG_PRINT(F, ...) Serial.printf("BLE: " F, ##__VA_ARGS__)
-  #define BLE_DEBUG_PRINTLN(F, ...) Serial.printf("BLE: " F "\n", ##__VA_ARGS__)
+#include <Arduino.h>
+#define BLE_DEBUG_PRINT(F, ...) Serial.printf("BLE: " F, ##__VA_ARGS__)
+#define BLE_DEBUG_PRINTLN(F, ...) Serial.printf("BLE: " F "\n", ##__VA_ARGS__)
 #else
-  #define BLE_DEBUG_PRINT(...) {}
-  #define BLE_DEBUG_PRINTLN(...) {}
+#define BLE_DEBUG_PRINT(...) {}
+#define BLE_DEBUG_PRINTLN(...) {}
 #endif
