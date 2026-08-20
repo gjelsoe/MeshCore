@@ -17,110 +17,132 @@ void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code
     uint8_t addr[8];
     memset(addr, 0, sizeof(addr));
     esp_efuse_mac_get_default(addr);
-    sprintf(name, "%02X%02X%02X%02X%02X%02X",    // modify (IN-OUT param)
-          addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
+    sprintf(name, "%02X%02X%02X%02X%02X%02X",
+            addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
   }
   char dev_name[32+16];
   sprintf(dev_name, "%s%s", prefix, name);
 
-  // Create the BLE Device
-  BLEDevice::init(dev_name);
-  BLEDevice::setSecurityCallbacks(this);
-  BLEDevice::setMTU(MAX_FRAME_SIZE);
+  NimBLEDevice::init(dev_name);
+  NimBLEDevice::setMTU(MAX_FRAME_SIZE);
 
-  BLESecurity  sec;
-  sec.setStaticPIN(pin_code);
-  sec.setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
+  deviceConnected = false;
+  oldDeviceConnected = false;
+  adv_restart_time = 0;
 
-  //BLEDevice::setPower(ESP_PWR_LVL_N8);
+  // Sikkerhed
+  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
+  NimBLEDevice::setSecurityAuth(true, true, true);
+  NimBLEDevice::setSecurityPasskey(pin_code);
 
-  // Create the BLE Server
-  pServer = BLEDevice::createServer();
+  pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(this);
 
-  // Create the BLE Service
   pService = pServer->createService(SERVICE_UUID);
 
-  // Create a BLE Characteristic
-  pTxCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_TX, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
-  pTxCharacteristic->setAccessPermissions(ESP_GATT_PERM_READ_ENC_MITM);
-  pTxCharacteristic->addDescriptor(new BLE2902());
+  // TX karakteristik
+  pTxCharacteristic = pService->createCharacteristic(
+      CHARACTERISTIC_UUID_TX,
+      NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY |
+      NIMBLE_PROPERTY::READ_ENC | NIMBLE_PROPERTY::READ_AUTHEN
+  );
 
-  BLECharacteristic * pRxCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_RX, BLECharacteristic::PROPERTY_WRITE);
-  pRxCharacteristic->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
+  // RX karakteristik
+  NimBLECharacteristic *pRxCharacteristic = pService->createCharacteristic(
+      CHARACTERISTIC_UUID_RX,
+      NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC | NIMBLE_PROPERTY::WRITE_AUTHEN
+  );
   pRxCharacteristic->setCallbacks(this);
 
-  pServer->getAdvertising()->addServiceUUID(SERVICE_UUID);
+  // --- OPRET ADVERTISING-DATA OG SCAN-RESPONSE MED NAVN ---
+  NimBLEAdvertisementData advData;
+  NimBLEAdvertisementData scanData;
+
+  // Flag: general discoverable + LE only
+  advData.setFlags(0x06);
+  // Tilføj service UUID (i advertising-pakken)
+  advData.addServiceUUID(SERVICE_UUID);
+
+  // Sæt navnet i scan-response (det er her, der er mest plads)
+  scanData.setName(dev_name);
+
+  // Sæt også navnet i advertising-pakken (hvis der er plads – ellers overskriver NimBLE det automatisk)
+  advData.setName(dev_name);
+
+  // Overfør data til advertising-objektet
+  auto* pAdvertising = pServer->getAdvertising();
+  pAdvertising->setAdvertisementData(advData);
+  pAdvertising->setScanResponseData(scanData);
+  pAdvertising->enableScanResponse(true);   // vigtig!
+
+  // Service UUID tilføjes også til advertising-filter (gøres allerede via addServiceUUID ovenfor)
+  // pAdvertising->addServiceUUID(SERVICE_UUID);  // allerede gjort via advData
+
+  // Du kan evt. sætte interval etc.
+  // pAdvertising->setMinInterval(500);
+  // pAdvertising->setMaxInterval(1000);
 }
+// -------- Security callbacks (part of NimBLEServerCallbacks)
 
-// -------- BLESecurityCallbacks methods
-
-uint32_t SerialBLEInterface::onPassKeyRequest() {
-  BLE_DEBUG_PRINTLN("onPassKeyRequest()");
+uint32_t SerialBLEInterface::onPassKeyDisplay() {
+  BLE_DEBUG_PRINTLN("onPassKeyDisplay()");
   return _pin_code;
 }
 
-void SerialBLEInterface::onPassKeyNotify(uint32_t pass_key) {
-  BLE_DEBUG_PRINTLN("onPassKeyNotify(%u)", pass_key);
+void SerialBLEInterface::onConfirmPassKey(NimBLEConnInfo& connInfo, uint32_t pin) {
+  BLE_DEBUG_PRINTLN("onConfirmPassKey(%u)", pin);
+  NimBLEDevice::injectConfirmPasskey(connInfo, true);
 }
 
-bool SerialBLEInterface::onConfirmPIN(uint32_t pass_key) {
-  BLE_DEBUG_PRINTLN("onConfirmPIN(%u)", pass_key);
-  return true;
-}
-
-bool SerialBLEInterface::onSecurityRequest() {
-  BLE_DEBUG_PRINTLN("onSecurityRequest()");
-  return true;  // allow
-}
-
-void SerialBLEInterface::onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) {
-  if (cmpl.success) {
-    BLE_DEBUG_PRINTLN(" - SecurityCallback - Authentication Success");
-    deviceConnected = true;
+void SerialBLEInterface::onAuthenticationComplete(NimBLEConnInfo& connInfo) {
+  if (connInfo.isEncrypted()) {
+    if (_isEnabled) {
+      BLE_DEBUG_PRINTLN(" - SecurityCallback - Authentication Success");
+      deviceConnected = true;
+    } else {
+      BLE_DEBUG_PRINTLN("Auth success but not enabled, disconnecting");
+      pServer->disconnect(connInfo.getConnHandle());
+    }
   } else {
     BLE_DEBUG_PRINTLN(" - SecurityCallback - Authentication Failure*");
-
-    //pServer->removePeerDevice(pServer->getConnId(), true);
-    pServer->disconnect(pServer->getConnId());
-    adv_restart_time = millis() + ADVERT_RESTART_DELAY;
+    pServer->disconnect(connInfo.getConnHandle());
+    if (_isEnabled) {
+      adv_restart_time = millis() + ADVERT_RESTART_DELAY;
+    }
   }
 }
 
-// -------- BLEServerCallbacks methods
+// -------- NimBLEServerCallbacks methods
 
-void SerialBLEInterface::onConnect(BLEServer* pServer) {
+void SerialBLEInterface::onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) {
+  BLE_DEBUG_PRINTLN("onConnect(), conn_id=%d, mtu=%d", connInfo.getConnHandle(), pServer->getPeerMTU(connInfo.getConnHandle()));
+  last_conn_id = connInfo.getConnHandle();
 }
 
-void SerialBLEInterface::onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t *param) {
-  BLE_DEBUG_PRINTLN("onConnect(), conn_id=%d, mtu=%d", param->connect.conn_id, pServer->getPeerMTU(param->connect.conn_id));
-  last_conn_id = param->connect.conn_id;
+void SerialBLEInterface::onMTUChange(uint16_t MTU, NimBLEConnInfo& connInfo) {
+  BLE_DEBUG_PRINTLN("onMtuChanged(), mtu=%d", MTU);
 }
 
-void SerialBLEInterface::onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param_t* param) {
-  BLE_DEBUG_PRINTLN("onMtuChanged(), mtu=%d", pServer->getPeerMTU(param->mtu.conn_id));
-}
-
-void SerialBLEInterface::onDisconnect(BLEServer* pServer) {
-  BLE_DEBUG_PRINTLN("onDisconnect()");
+void SerialBLEInterface::onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) {
+  BLE_DEBUG_PRINTLN("onDisconnect(), reason=%d", reason);
   deviceConnected = false;
   if (_isEnabled) {
     adv_restart_time = millis() + ADVERT_RESTART_DELAY;
   }
 }
 
-// -------- BLECharacteristicCallbacks methods
+// -------- NimBLECharacteristicCallbacks methods
 
-void SerialBLEInterface::onWrite(BLECharacteristic* pCharacteristic, esp_ble_gatts_cb_param_t* param) {
-  uint8_t* rxValue = pCharacteristic->getData();
-  int len = pCharacteristic->getLength();
+void SerialBLEInterface::onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) {
+  std::string value = pCharacteristic->getValue();   // getData() is gone in NimBLE - getValue() gives us a safe copy
+  size_t len = value.length();
 
   if (len > MAX_FRAME_SIZE) {
-    BLE_DEBUG_PRINTLN("ERROR: onWrite(), frame too big, len=%d", len);
+    BLE_DEBUG_PRINTLN("ERROR: onWrite(), frame too big, len=%d", (int)len);
   } else {
     Frame frame = {};
-    frame.len = len;
-    memcpy(frame.buf, rxValue, len);
+    frame.len = (uint8_t)len;
+    memcpy(frame.buf, value.data(), len);
 
     if (xQueueSend(recv_queue, &frame, 0) != pdTRUE) {
       BLE_DEBUG_PRINTLN("ERROR: onWrite(), recv_queue is full!");
@@ -135,11 +157,17 @@ void SerialBLEInterface::clearBuffers() {
   send_queue_len = 0;
 }
 
-void SerialBLEInterface::enable() { 
+void SerialBLEInterface::enable() {
   if (_isEnabled) return;
 
   _isEnabled = true;
   clearBuffers();
+
+  // If disable() previously removeService()'d us, add it back before starting it again.
+  // (Calling addService() when it was never removed would push a duplicate entry, so guard it.)
+  if (pService->getRemoved()) {
+    pServer->addService(pService);
+  }
 
   // Start the service
   pService->start();
@@ -160,7 +188,7 @@ void SerialBLEInterface::disable() {
 
   pServer->getAdvertising()->stop();
   pServer->disconnect(last_conn_id);
-  pService->stop();
+  pServer->removeService(pService, false);   // hide the service (deleteSvc=false keeps pService/characteristics valid for re-adding in enable())
   oldDeviceConnected = deviceConnected = false;
   adv_restart_time = 0;
 }
@@ -218,6 +246,10 @@ size_t SerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
     BLE_DEBUG_PRINTLN("readBytes: sz=%d, hdr=%d", (uint32_t) frame.len, (uint32_t) dest[0]);
     return frame.len;
   }
+
+  // Ghost-connect watchdog: don't rely solely on onDisconnect() having fired -
+  // force deviceConnected back in sync with what the stack actually reports.
+  if (pServer->getConnectedCount() == 0) deviceConnected = false;
 
   if (deviceConnected != oldDeviceConnected) {
     if (!deviceConnected) {    // disconnecting

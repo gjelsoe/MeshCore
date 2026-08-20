@@ -1,17 +1,16 @@
 #pragma once
 
 #include "../BaseSerialInterface.h"
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
+#include <NimBLEDevice.h>   // pulls in NimBLEServer, NimBLECharacteristic, NimBLEUtils etc. - no other BLE headers needed
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
-class SerialBLEInterface : public BaseSerialInterface, BLESecurityCallbacks, BLEServerCallbacks, BLECharacteristicCallbacks {
-  BLEServer *pServer;
-  BLEService *pService;
-  BLECharacteristic * pTxCharacteristic;
+class SerialBLEInterface : public BaseSerialInterface,
+                            public NimBLEServerCallbacks,          // also covers security callbacks in NimBLE
+                            public NimBLECharacteristicCallbacks {
+  NimBLEServer *pServer;
+  NimBLEService *pService;
+  NimBLECharacteristic *pTxCharacteristic;
   bool deviceConnected;
   bool oldDeviceConnected;
   bool _isEnabled;
@@ -26,30 +25,34 @@ class SerialBLEInterface : public BaseSerialInterface, BLESecurityCallbacks, BLE
   };
 
   #define FRAME_QUEUE_SIZE  4
+
+  // recv_queue is written from the NimBLE host task (onWrite) and read from the
+  // app/loop task (checkRecvFrame) -> needs to stay a real FreeRTOS queue for
+  // thread-safety (this is what PR #3007 fixed for the Bluedroid version too).
   StaticQueue_t recv_queue_state;
   uint8_t recv_queue_storage[FRAME_QUEUE_SIZE * sizeof(Frame)];
   QueueHandle_t recv_queue;
+
+  // send_queue is only ever touched from the app/loop task (writeFrame() and
+  // checkRecvFrame() both run there), so a plain array is fine, same as original.
   int send_queue_len;
   Frame send_queue[FRAME_QUEUE_SIZE];
 
   void clearBuffers();
 
 protected:
-  // BLESecurityCallbacks methods
-  uint32_t onPassKeyRequest() override;
-  void onPassKeyNotify(uint32_t pass_key) override;
-  bool onConfirmPIN(uint32_t pass_key) override;
-  bool onSecurityRequest() override;
-  void onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) override;
+  // NimBLEServerCallbacks (connection lifecycle)
+  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override;
+  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override;
+  void onMTUChange(uint16_t MTU, NimBLEConnInfo& connInfo) override;
 
-  // BLEServerCallbacks methods
-  void onConnect(BLEServer* pServer) override;
-  void onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t *param) override;
-  void onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param_t* param) override;
-  void onDisconnect(BLEServer* pServer) override;
+  // NimBLEServerCallbacks (security - merged in from the old BLESecurityCallbacks)
+  uint32_t onPassKeyDisplay() override;
+  void onConfirmPassKey(NimBLEConnInfo& connInfo, uint32_t pin) override;
+  void onAuthenticationComplete(NimBLEConnInfo& connInfo) override;
 
-  // BLECharacteristicCallbacks methods
-  void onWrite(BLECharacteristic* pCharacteristic, esp_ble_gatts_cb_param_t* param) override;
+  // NimBLECharacteristicCallbacks
+  void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override;
 
 public:
   SerialBLEInterface() {
