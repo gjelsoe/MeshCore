@@ -238,6 +238,12 @@ public:
   void handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char* command, char* reply);
   void loop();
 
+  // Forwards to the CommonCLI member so "get config"/"put config" in the
+  // sketch's loop() can stream the live prefs directly, bypassing the
+  // fixed-size reply[] buffer.
+  bool dumpConfigToStream(Stream& s) { return _cli.dumpConfigToStream(s); }
+  bool loadConfigFromStream(Stream& s) { return _cli.loadConfigFromStream(s); }
+
 #if defined(WITH_BRIDGE)
   void setBridgeState(bool enable) override {
     if (enable == bridge.isRunning()) return;
@@ -245,7 +251,7 @@ public:
     {
       bridge.begin();
     }
-    else 
+    else
     {
       bridge.end();
     }

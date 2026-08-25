@@ -288,4 +288,10 @@ public:
   bool savePrefs(FILESYSTEM* _fs);
   void handleCommand(uint32_t sender_timestamp, char* command, char* reply);
   uint8_t buildAdvertData(uint8_t node_type, uint8_t* app_data);
+
+  // Dump/load the live in-memory prefs as JSON directly to/from an
+  // arbitrary Stream (used by the sketch's "get config"/"put config"
+  // serial commands, bypassing the fixed-size reply[] buffer).
+  bool dumpConfigToStream(Stream& s) { return _prefs->saveSerial(s); }
+  bool loadConfigFromStream(Stream& s) { return _prefs->loadSerial(s); }
 };

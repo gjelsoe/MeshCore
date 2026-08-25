@@ -22,10 +22,33 @@ void halt() {
   while (1) ;
 }
 
+// Read-only Stream wrapper over an already-collected in-memory buffer,
+// used to feed ConfigSerializer::loadSerial() after a "put config" paste
+// has been fully received.
+class MemoryStream : public Stream {
+  const char* _data;
+  size_t _len, _pos = 0;
+public:
+  MemoryStream(const char* data, size_t len) : _data(data), _len(len) {}
+  int available() override { return _len - _pos; }
+  int read() override  { return _pos < _len ? (uint8_t)_data[_pos++] : -1; }
+  int peek() override  { return _pos < _len ? (uint8_t)_data[_pos]   : -1; }
+  size_t write(uint8_t) override { return 0; }  // unused, read-only
+};
+
 static char command[160];
 #ifdef ETHERNET_ENABLED
 static char ethernet_command[160];
 #endif
+
+// State for the non-blocking "put config" paste capture. Kept outside the
+// normal command[] buffer so it can span many loop() iterations without
+// ever blocking the_mesh.loop() (mesh RX/forwarding) while a user pastes
+// or types config JSON over serial.
+#define CONFIG_PASTE_BUF_SIZE 4096
+static char config_paste_buf[CONFIG_PASTE_BUF_SIZE];
+static size_t config_paste_len = 0;
+static bool awaiting_config_paste = false;
 
 // For power saving
 unsigned long POWERSAVING_FIRSTSLEEP_SECS = 120; // The first sleep (if enabled) from boot
@@ -129,7 +152,7 @@ void setup() {
 
   // send out initial zero hop Advertisement to the mesh
 #if ENABLE_ADVERT_ON_BOOT == 1
-  the_mesh.sendSelfAdvertisement(16000, false);
+  //the_mesh.sendSelfAdvertisement(16000, false);
 #endif
 
   board.onBootComplete();
@@ -137,39 +160,94 @@ void setup() {
 
 void loop() {
   // Handle Serial CLI
-  int len = strlen(command);
-  while (Serial.available() && len < sizeof(command)-1) {
-    char c = Serial.read();
-    if (c != '\n') {
-      command[len++] = c;
-      command[len] = 0;
+  if (awaiting_config_paste) {
+    // Non-blocking capture of a "put config" paste. Uses the same line
+    // convention as the normal command parsing below ('\n' is ignored,
+    // '\r' is the real line terminator), but here we watch for a line
+    // that contains only "." as the end-of-input marker. Only a small
+    // fixed-size buffer is scanned per call, so this never stalls
+    // the_mesh.loop() while the user is typing or pasting.
+    while (Serial.available() && config_paste_len < CONFIG_PASTE_BUF_SIZE - 1) {
+      char c = Serial.read();
+      if (c == '\n') continue;   // same convention as command parsing below
       Serial.print(c);
-    }
-    if (c == '\r') break;
-  }
-  if (len == sizeof(command)-1) {  // command buffer full
-    command[sizeof(command)-1] = '\r';
-  }
+      config_paste_buf[config_paste_len++] = c;
+      config_paste_buf[config_paste_len] = 0;
 
-  if (len > 0 && command[len - 1] == '\r') {  // received complete line
-    Serial.print('\n');
-    command[len - 1] = 0;  // replace newline with C string null terminator
-    char reply[160];
-    reply[0] = 0;
+      if (c == '\r') {
+        size_t line_start = config_paste_len - 1;
+        while (line_start > 0 && config_paste_buf[line_start - 1] != '\r') line_start--;
+        size_t line_len = (config_paste_len - 1) - line_start;
+
+        if (line_len == 1 && config_paste_buf[line_start] == '.') {
+          config_paste_buf[line_start] = 0;   // cut off the terminator line
+          Serial.println();
+
+          MemoryStream ms(config_paste_buf, line_start);
+          bool ok = the_mesh.loadConfigFromStream(ms);
+          Serial.print("  -> "); Serial.println(ok ? "OK" : "ERROR: config parse failed");
+
+          awaiting_config_paste = false;
+          config_paste_len = 0;
+          break;
+        }
+      }
+    }
+    if (awaiting_config_paste && config_paste_len >= CONFIG_PASTE_BUF_SIZE - 1) {
+      Serial.println("  -> ERROR: config paste too large, aborted");
+      awaiting_config_paste = false;
+      config_paste_len = 0;
+    }
+  } else {
+    int len = strlen(command);
+    while (Serial.available() && len < sizeof(command)-1) {
+      char c = Serial.read();
+      if (c != '\n') {
+        command[len++] = c;
+        command[len] = 0;
+        Serial.print(c);
+      }
+      if (c == '\r') break;
+    }
+    if (len == sizeof(command)-1) {  // command buffer full
+      command[sizeof(command)-1] = '\r';
+    }
+
+    if (len > 0 && command[len - 1] == '\r') {  // received complete line
+      Serial.print('\n');
+      command[len - 1] = 0;  // replace newline with C string null terminator
+
+      if (strcmp(command, "get config") == 0) {
+        // Dump the live in-memory prefs as JSON directly to Serial.
+        // Bypasses the 160-byte reply[] buffer entirely, since a full
+        // config dump can easily exceed it.
+        Serial.println();
+        bool ok = the_mesh.dumpConfigToStream(Serial);
+        Serial.println();
+        if (!ok) Serial.println("  -> ERROR: config dump failed");
+      } else if (strcmp(command, "put config") == 0) {
+        Serial.println("Paste config JSON, end with a line containing only '.':");
+        awaiting_config_paste = true;
+        config_paste_len = 0;
+      } else {
+        char reply[160];
+        reply[0] = 0;
 #ifdef ETHERNET_ENABLED
-    if (!ethernet_handle_command(command, reply)) {
-      // Outpath PR
-      the_mesh.handleCommand(0, NULL, command, reply);
-    }
+        if (!ethernet_handle_command(command, reply)) {
+          // Outpath PR
+          the_mesh.handleCommand(0, NULL, command, reply);
+        }
 #else
-    // Outpath PR
-    the_mesh.handleCommand(0, NULL, command, reply);  // NOTE: there is no sender_timestamp via serial!
+        // Outpath PR
+        the_mesh.handleCommand(0, NULL, command, reply);  // NOTE: there is no sender_timestamp via serial!
 #endif
-    if (reply[0]) {
-      Serial.print("  -> "); Serial.println(reply);
-    }
+        if (reply[0]) {
+          Serial.print("  -> "); Serial.println(reply);
+        }
+      }
 
-    command[0] = 0;  // reset command buffer
+      command[0] = 0;  // reset command buffer
+    }
   }
 
 #ifdef ETHERNET_ENABLED
@@ -211,7 +289,10 @@ void loop() {
 #ifdef HAS_EXTERNAL_WATCHDOG
   external_watchdog.loop();
 #endif
-  if (the_mesh.getNodePrefs()->powersaving_enabled && !the_mesh.hasPendingWork()) {
+
+  // Don't sleep while a "put config" paste is in progress, otherwise
+  // UART reception could be disrupted mid-paste.
+  if (!awaiting_config_paste && the_mesh.getNodePrefs()->powersaving_enabled && !the_mesh.hasPendingWork()) {
 #if defined(NRF52_PLATFORM)
     board.sleep(0); // nrf ignores seconds param, sleeps whenever possible
 #else
