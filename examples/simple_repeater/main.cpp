@@ -2,6 +2,7 @@
 #include <Mesh.h>
 
 #include "MyMesh.h"
+#include "ConfigTarget.h"
 
 #ifdef DISPLAY_CLASS
   #include "UITask.h"
@@ -49,6 +50,22 @@ static char ethernet_command[160];
 static char config_paste_buf[CONFIG_PASTE_BUF_SIZE];
 static size_t config_paste_len = 0;
 static bool awaiting_config_paste = false;
+static ConfigTarget awaiting_config_target = CFG_PREFS;
+
+// Returns true and sets 'target' if 'arg' names a known config target.
+// Empty arg ("get config"/"put config" with nothing after) means the
+// normal node prefs. "filter"/"report" only match when the corresponding
+// optional engine is compiled in (see ConfigTarget.h).
+static bool parseConfigTarget(const char* arg, ConfigTarget& target) {
+  if (arg[0] == 0) { target = CFG_PREFS; return true; }
+#ifdef WITH_CHANNEL_FILTER
+  if (strcmp(arg, "filter") == 0) { target = CFG_FILTER; return true; }
+#endif
+#ifdef WITH_REPORT_ENGINE
+  if (strcmp(arg, "report") == 0) { target = CFG_REPORT; return true; }
+#endif
+  return false;
+}
 
 // For power saving
 unsigned long POWERSAVING_FIRSTSLEEP_SECS = 120; // The first sleep (if enabled) from boot
@@ -152,7 +169,7 @@ void setup() {
 
   // send out initial zero hop Advertisement to the mesh
 #if ENABLE_ADVERT_ON_BOOT == 1
-  //the_mesh.sendSelfAdvertisement(16000, false);
+  the_mesh.sendSelfAdvertisement(16000, false);
 #endif
 
   board.onBootComplete();
@@ -184,7 +201,7 @@ void loop() {
           Serial.println();
 
           MemoryStream ms(config_paste_buf, line_start);
-          bool ok = the_mesh.loadConfigFromStream(ms);
+          bool ok = the_mesh.loadConfigFromStream(ms, awaiting_config_target);
           Serial.print("  -> "); Serial.println(ok ? "OK" : "ERROR: config parse failed");
 
           awaiting_config_paste = false;
@@ -217,18 +234,36 @@ void loop() {
       Serial.print('\n');
       command[len - 1] = 0;  // replace newline with C string null terminator
 
-      if (strcmp(command, "get config") == 0) {
-        // Dump the live in-memory prefs as JSON directly to Serial.
-        // Bypasses the 160-byte reply[] buffer entirely, since a full
-        // config dump can easily exceed it.
-        Serial.println();
-        bool ok = the_mesh.dumpConfigToStream(Serial);
-        Serial.println();
-        if (!ok) Serial.println("  -> ERROR: config dump failed");
-      } else if (strcmp(command, "put config") == 0) {
-        Serial.println("Paste config JSON, end with a line containing only '.':");
-        awaiting_config_paste = true;
-        config_paste_len = 0;
+      const char* GET_CONFIG_PREFIX = "get config";
+      const char* PUT_CONFIG_PREFIX = "put config";
+      size_t GET_LEN = strlen(GET_CONFIG_PREFIX);
+      size_t PUT_LEN = strlen(PUT_CONFIG_PREFIX);
+
+      if (strncmp(command, GET_CONFIG_PREFIX, GET_LEN) == 0 &&
+          (command[GET_LEN] == 0 || command[GET_LEN] == ' ')) {
+        const char* arg = command[GET_LEN] == ' ' ? command + GET_LEN + 1 : command + GET_LEN;
+        ConfigTarget target;
+        if (!parseConfigTarget(arg, target)) {
+          Serial.println("  -> ERROR: unknown config target");
+        } else {
+          // Dump the live in-memory config as JSON directly to Serial.
+          // Bypasses the 160-byte reply[] buffer entirely, since a full
+          // config dump can easily exceed it.
+          Serial.println();
+          bool ok = the_mesh.dumpConfigToStream(Serial, target);
+          Serial.println();
+          if (!ok) Serial.println("  -> ERROR: config dump failed");
+        }
+      } else if (strncmp(command, PUT_CONFIG_PREFIX, PUT_LEN) == 0 &&
+                 (command[PUT_LEN] == 0 || command[PUT_LEN] == ' ')) {
+        const char* arg = command[PUT_LEN] == ' ' ? command + PUT_LEN + 1 : command + PUT_LEN;
+        if (!parseConfigTarget(arg, awaiting_config_target)) {
+          Serial.println("  -> ERROR: unknown config target");
+        } else {
+          Serial.println("Paste config JSON, end with a line containing only '.':");
+          awaiting_config_paste = true;
+          config_paste_len = 0;
+        }
       } else {
         char reply[160];
         reply[0] = 0;

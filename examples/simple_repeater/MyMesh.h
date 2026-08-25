@@ -36,6 +36,7 @@
 #include <helpers/RegionMap.h>
 #include <helpers/RoutingPolicy.h>
 #include "RateLimiter.h"
+#include "ConfigTarget.h"     // must be after any other using get/put config
 
 #ifdef WITH_BRIDGE
 extern AbstractBridge* bridge;
@@ -237,12 +238,47 @@ public:
   // Outpath PR
   void handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char* command, char* reply);
   void loop();
+  void scriptHandleCommand(const char* arg, char* reply, ClientInfo* sender = nullptr);
 
-  // Forwards to the CommonCLI member so "get config"/"put config" in the
-  // sketch's loop() can stream the live prefs directly, bypassing the
-  // fixed-size reply[] buffer.
-  bool dumpConfigToStream(Stream& s) { return _cli.dumpConfigToStream(s); }
-  bool loadConfigFromStream(Stream& s) { return _cli.loadConfigFromStream(s); }
+  // Dump/load a config object as JSON to/from an arbitrary Stream, used by
+  // the sketch's "get config"/"put config [filter|report]" serial commands.
+  // Bypasses the fixed-size reply[] buffer, and routes each target to the
+  // object that already owns its own saveSerial()/loadSerial() — CommonCLI
+  // for prefs, ChannelFilter/ScriptRulesSerializer directly for the rest,
+  // so those subsystems stay fully decoupled from CommonCLI.
+  bool dumpConfigToStream(Stream& s, ConfigTarget target) {
+    switch (target) {
+      case CFG_PREFS:  return _cli.dumpConfigToStream(s);
+#ifdef WITH_CHANNEL_FILTER
+      case CFG_FILTER: return _filter.saveSerial(s);
+#endif
+#ifdef WITH_REPORT_ENGINE
+      case CFG_REPORT: {
+        ScriptRulesSerializer rs(_scriptRuleCount, _scriptRules, _bootConfig, _dmConfig);
+        return rs.saveSerial(s);
+      }
+#endif
+    }
+    return false;
+  }
+
+  bool loadConfigFromStream(Stream& s, ConfigTarget target) {
+    switch (target) {
+      case CFG_PREFS:  return _cli.loadConfigFromStream(s);
+#ifdef WITH_CHANNEL_FILTER
+      case CFG_FILTER: return _filter.loadSerial(s);
+#endif
+#ifdef WITH_REPORT_ENGINE
+      case CFG_REPORT: {
+        ScriptRulesSerializer rs(_scriptRuleCount, _scriptRules, _bootConfig, _dmConfig);
+        bool ok = rs.loadSerial(s);
+        if (ok) _scriptRulesDirty = true;   // debounced write-out, handled on nRF52 elsewhere
+        return ok;
+      }
+#endif
+    }
+    return false;
+  }
 
 #if defined(WITH_BRIDGE)
   void setBridgeState(bool enable) override {
