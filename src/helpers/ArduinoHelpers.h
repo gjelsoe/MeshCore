@@ -15,17 +15,21 @@ class VolatileRTCClock : public mesh::RTCClock {
   uint32_t base_time;
   uint64_t accumulator;
   unsigned long prev_millis;
+  bool _synced;
 
 public:
   VolatileRTCClock() {
 #ifdef NRF52_PLATFORM
     if (persistent_magic == CLOCK_MAGIC_NUM && persistent_time >= RTC_TIME_MIN) {
       base_time = persistent_time;
+      _synced = true;    // restored from a previously-real sync, not the fallback seed
     } else {
       base_time = RTC_TIME_MIN;
+      _synced = false;   // running on the hardcoded fallback seed until a real sync happens
     }
 #else
     base_time = 1715770351;
+    _synced = false;     // no persistence on this platform -- always starts unsynced
 #endif
 
     accumulator = 0;
@@ -38,6 +42,7 @@ public:
     base_time = time;
     accumulator = 0;
     prev_millis = millis();
+    _synced = true;   // explicit set = GPS fix or manual "time set" -- real sync
 
 #ifdef NRF52_PLATFORM
     persistent_magic = CLOCK_MAGIC_NUM;
@@ -51,10 +56,17 @@ public:
     prev_millis = now;
 
 #ifdef NRF52_PLATFORM
-    persistent_magic = CLOCK_MAGIC_NUM;
-    persistent_time = getCurrentTime();
+    // Only persist once genuinely synced -- otherwise a fallback-seeded clock
+    // (never actually synced) would look "restored from a real sync" on the
+    // next reboot, since persistent_time only ever increases from RTC_TIME_MIN.
+    if (_synced) {
+      persistent_magic = CLOCK_MAGIC_NUM;
+      persistent_time = getCurrentTime();
+    }
 #endif
   }
+
+  bool isTimeValid() override { return _synced; }
 };
 
 class ArduinoMillis : public mesh::MillisecondClock {

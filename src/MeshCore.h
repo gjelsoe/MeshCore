@@ -116,6 +116,16 @@ public:
    */
   virtual void tick() { /* no op */}
 
+  /**
+   * \returns  whether getCurrentTime() reflects a real, synced time
+   *           (GPS fix / manual set / battery-backed HW RTC), as opposed
+   *           to an internal fallback seed used only to keep the clock
+   *           ticking forward before a real sync has happened.
+   *           Default true: clocks without a fallback-seed concept
+   *           (e.g. a plain HW RTC) are always considered valid.
+  */
+  virtual bool isTimeValid() { return true; }
+
   uint32_t getCurrentTimeUnique() {
     uint32_t t = getCurrentTime();
     if (t <= last_unique) {

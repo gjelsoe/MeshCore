@@ -203,20 +203,24 @@ static RTC_NOINIT_ATTR uint32_t _rtc_backup_magic;
 #define RTC_TIME_MIN      1772323200  // 1 Mar 2026
 
 class ESP32RTCClock : public mesh::RTCClock {
+  bool _synced = false;
 public:
   ESP32RTCClock() { }
   void begin() {
     esp_reset_reason_t reason = esp_reset_reason();
     if (reason == ESP_RST_DEEPSLEEP) {
-      return;  // ESP-IDF preserves system time across deep sleep
+      _synced = true;  // ESP-IDF preserves system time across deep sleep
+      return;
     }
     // All other resets (power-on, crash, WDT, brownout) lose system time.
     // Restore from RTC backup if valid, otherwise use hardcoded seed.
     struct timeval tv;
     if (_rtc_backup_magic == RTC_BACKUP_MAGIC && _rtc_backup_time > RTC_TIME_MIN) {
       tv.tv_sec = _rtc_backup_time;
+      _synced = true;   // restored from a previously-real sync, not the fallback seed
     } else {
       tv.tv_sec = RTC_TIME_MIN;
+      _synced = false;  // running on the hardcoded fallback seed until a real sync happens
     }
     tv.tv_usec = 0;
     settimeofday(&tv, NULL);
@@ -233,6 +237,7 @@ public:
     settimeofday(&tv, NULL);
     _rtc_backup_time = time;
     _rtc_backup_magic = RTC_BACKUP_MAGIC;
+    _synced = true;   // explicit set = GPS fix or manual "time set" -- real sync
   }
   void tick() override {
     time_t now;
@@ -242,6 +247,7 @@ public:
       _rtc_backup_magic = RTC_BACKUP_MAGIC;
     }
   }
+  bool isTimeValid() override { return _synced; }
 };
 
 #endif
