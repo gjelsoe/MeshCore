@@ -138,7 +138,6 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   unsigned long _nextScriptEval   = 0;
   bool          _scriptRulesDirty = false;
   BootConfig    _bootConfig       = {};
-  DmConfig      _dmConfig         = {};
   unsigned long _nextBootMsg      = 0;
 
   void _scriptLoad();
