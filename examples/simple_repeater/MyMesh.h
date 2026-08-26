@@ -254,7 +254,7 @@ public:
 #endif
 #ifdef WITH_REPORT_ENGINE
       case CFG_REPORT: {
-        ScriptRulesSerializer rs(_scriptRuleCount, _scriptRules, _bootConfig, _dmConfig);
+        ScriptRulesSerializer rs(_scriptRuleCount, _scriptRules, _bootConfig);
         return rs.saveSerial(s);
       }
 #endif
@@ -270,7 +270,7 @@ public:
 #endif
 #ifdef WITH_REPORT_ENGINE
       case CFG_REPORT: {
-        ScriptRulesSerializer rs(_scriptRuleCount, _scriptRules, _bootConfig, _dmConfig);
+        ScriptRulesSerializer rs(_scriptRuleCount, _scriptRules, _bootConfig);
         bool ok = rs.loadSerial(s);
         if (ok) _scriptRulesDirty = true;   // debounced write-out, handled on nRF52 elsewhere
         return ok;
