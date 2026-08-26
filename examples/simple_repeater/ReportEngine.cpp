@@ -8,8 +8,9 @@
 //   _scriptEvaluate()                     — from loop() on timer
 //   _scriptSendMessage(rule, text)        — internal, called by _scriptEvaluate()
 
-#include "MyMesh.h"
 #include "ReportEngine.h"
+
+#include "MyMesh.h"
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  LOAD / SAVE
@@ -18,8 +19,6 @@
 void MyMesh::_scriptLoad() {
   memset(_scriptRules, 0, sizeof(_scriptRules));
   memset(&_bootConfig, 0, sizeof(_bootConfig));
-  memset(&_dmConfig, 0, sizeof(_dmConfig));
-  _dmConfig.path_hash_size = 1;  // default to 1-byte path hashes
   _scriptRuleCount = 0;
 
   // Try JSON format first (current format)
@@ -31,7 +30,7 @@ void MyMesh::_scriptLoad() {
   File f = _fs->open(SCRIPT_RULES_FILE_JSON);
 #endif
   if (f) {
-    ScriptRulesSerializer ser(_scriptRuleCount, _scriptRules, _bootConfig, _dmConfig);
+    ScriptRulesSerializer ser(_scriptRuleCount, _scriptRules, _bootConfig);
     ser.loadSerial(f);
     f.close();
     if (_scriptRuleCount > MAX_SCRIPT_RULES) _scriptRuleCount = MAX_SCRIPT_RULES;
@@ -50,13 +49,13 @@ void MyMesh::_scriptLoad() {
   if (!fb) return;
 
   static ScriptRulesFile hdr;
-  if (fb.read((uint8_t*)&hdr, sizeof(hdr)) == sizeof(hdr) &&
-      hdr.version == 1) {  // only migrate binary files written before JSON format
+  if (fb.read((uint8_t *)&hdr, sizeof(hdr)) == sizeof(hdr) &&
+      hdr.version == 1) { // only migrate binary files written before JSON format
     if (hdr.count > MAX_SCRIPT_RULES) hdr.count = MAX_SCRIPT_RULES;
     memcpy(_scriptRules, hdr.rules, hdr.count * sizeof(ScriptRule));
     _scriptRuleCount = hdr.count;
     MESH_DEBUG_PRINTLN("ScriptEngine: loaded %d rules (binary, migrating)", (int)_scriptRuleCount);
-    _scriptRulesDirty = true;  // trigger resave in JSON format
+    _scriptRulesDirty = true; // trigger resave in JSON format
   }
   fb.close();
 }
@@ -71,8 +70,11 @@ void MyMesh::_scriptSave() {
   if (_fs->exists(SCRIPT_RULES_FILE_JSON)) _fs->remove(SCRIPT_RULES_FILE_JSON);
   File f = _fs->open(SCRIPT_RULES_FILE_JSON, "w");
 #endif
-  if (!f) { MESH_DEBUG_PRINTLN("ScriptEngine: ERROR saving rules"); return; }
-  ScriptRulesSerializer ser(_scriptRuleCount, _scriptRules, _bootConfig, _dmConfig);
+  if (!f) {
+    MESH_DEBUG_PRINTLN("ScriptEngine: ERROR saving rules");
+    return;
+  }
+  ScriptRulesSerializer ser(_scriptRuleCount, _scriptRules, _bootConfig);
   ser.saveSerial(f);
   f.close();
   // Remove old binary file if present (one-time migration cleanup)
@@ -84,7 +86,7 @@ void MyMesh::_scriptSave() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Forward declaration
-static void _scriptInitChannel(mesh::GroupChannel& ch, ChanType chan_type, const char* chan_name);
+static void _scriptInitChannel(mesh::GroupChannel &ch, ChanType chan_type, const char *chan_name);
 
 // Send the boot message once after startup — called from loop() via _nextBootMsg timer
 void MyMesh::_scriptSendBootMessage() {
@@ -95,17 +97,20 @@ void MyMesh::_scriptSendBootMessage() {
   memcpy(temp, &timestamp, 4);
   temp[4] = 0; // TXT_TYPE_PLAIN
   // Build boot message — replace {reason} with reset reason string if present
-  const char* reset_str = board.getResetReasonString(board.getResetReason());
+  const char *reset_str = board.getResetReasonString(board.getResetReason());
   if (!reset_str) reset_str = "";
   char boot_msg[96];
   {
-    const char* src = _bootConfig.message;
-    char* dst = boot_msg;
-    char* end = boot_msg + sizeof(boot_msg) - 1;
+    const char *src = _bootConfig.message;
+    char *dst = boot_msg;
+    char *end = boot_msg + sizeof(boot_msg) - 1;
     while (*src && dst < end) {
       if (strncmp(src, "{reason}", 8) == 0) {
         size_t rlen = strlen(reset_str);
-        if (dst + rlen < end) { memcpy(dst, reset_str, rlen); dst += rlen; }
+        if (dst + rlen < end) {
+          memcpy(dst, reset_str, rlen);
+          dst += rlen;
+        }
         src += 8;
       } else {
         *dst++ = *src++;
@@ -113,44 +118,25 @@ void MyMesh::_scriptSendBootMessage() {
     }
     *dst = 0;
   }
-  snprintf((char*)&temp[5], sizeof(temp) - 5, "%s: %s", _prefs.node_name, boot_msg);
-  int content_len = strlen((char*)&temp[5]);
+  snprintf((char *)&temp[5], sizeof(temp) - 5, "%s: %s", _prefs.node_name, boot_msg);
+  int content_len = strlen((char *)&temp[5]);
 
-  mesh::Packet* pkt = nullptr;
+  mesh::Packet *pkt = nullptr;
 
-  if (_bootConfig.chan_type == CHAN_DM) {
-    uint8_t dest_hash[4];
-    mesh::Utils::fromHex(dest_hash, sizeof(dest_hash), _bootConfig.chan_name);
-    int peer_idx = searchPeersByHash(dest_hash);
-    if (peer_idx < 0) { MESH_DEBUG_PRINTLN("ScriptEngine: boot DM peer not found"); return; }
-    uint8_t secret[PUB_KEY_SIZE];
-    getPeerSharedSecret(secret, peer_idx);
-    pkt = createDatagram(PAYLOAD_TYPE_TXT_MSG, acl.getClientByIdx(matching_peer_indexes[peer_idx])->id,
-                         secret, temp, 5 + content_len);
-    if (pkt) {
-      if (_dmConfig.enabled && _dmConfig.path_len > 0) {
-        uint8_t path_len = ((_dmConfig.path_hash_size - 1) << 6) | (_dmConfig.path_len & 63);
-        sendDirect(pkt, _dmConfig.path, path_len);
-      } else {
-        sendFloodScoped(default_scope, pkt, 0, _prefs.path_hash_mode + 1);
-      }
-    }
-  } else {
-    mesh::GroupChannel ch;
-    _scriptInitChannel(ch, _bootConfig.chan_type, _bootConfig.chan_name);
-    pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, ch, temp, 5 + content_len);
-    if (pkt) {
-      if (_bootConfig.zero_hop) {
-        sendZeroHop(pkt);
-      } else if (_bootConfig.scope_name[0] != 0) {
-        TransportKey scope;
-        memset(scope.key, 0, sizeof(scope.key));
-        RegionEntry* region = region_map.findByName(_bootConfig.scope_name);
-        if (region) region_map.getTransportKeysFor(*region, &scope, 1);
-        sendFloodScoped(scope, pkt, 0, _prefs.path_hash_mode + 1);
-      } else {
-        sendFloodScoped(default_scope, pkt, 0, _prefs.path_hash_mode + 1);
-      }
+  mesh::GroupChannel ch;
+  _scriptInitChannel(ch, _bootConfig.chan_type, _bootConfig.chan_name);
+  pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, ch, temp, 5 + content_len);
+  if (pkt) {
+    if (_bootConfig.zero_hop) {
+      sendZeroHop(pkt);
+    } else if (_bootConfig.scope_name[0] != 0) {
+      TransportKey scope;
+      memset(scope.key, 0, sizeof(scope.key));
+      RegionEntry *region = region_map.findByName(_bootConfig.scope_name);
+      if (region) region_map.getTransportKeysFor(*region, &scope, 1);
+      sendFloodScoped(scope, pkt, 0, _prefs.path_hash_mode + 1);
+    } else {
+      sendFloodScoped(default_scope, pkt, 0, _prefs.path_hash_mode + 1);
     }
   }
 }
@@ -161,8 +147,8 @@ void MyMesh::_scriptSendBootMessage() {
 //   secret[] = 16-byte key, zero-padded to PUB_KEY_SIZE
 //   hash[]   = first PATH_HASH_SIZE bytes of SHA256(key[0..15])
 //
-// CHAN_DM: chan_name is a hex pubkey hash — handled separately in _scriptSendMessage.
-static void _scriptInitChannel(mesh::GroupChannel& ch, ChanType chan_type, const char* chan_name) {
+// chan_name holds channel name (hash) or hex key (private).
+static void _scriptInitChannel(mesh::GroupChannel &ch, ChanType chan_type, const char *chan_name) {
   memset(&ch, 0, sizeof(ch));
 
   uint8_t key16[16];
@@ -172,8 +158,7 @@ static void _scriptInitChannel(mesh::GroupChannel& ch, ChanType chan_type, const
     char prefixed[40];
     snprintf(prefixed, sizeof(prefixed), "#%s", chan_name);
     uint8_t digest[32];
-    mesh::Utils::sha256(digest, sizeof(digest),
-                        (const uint8_t*)prefixed, strlen(prefixed));
+    mesh::Utils::sha256(digest, sizeof(digest), (const uint8_t *)prefixed, strlen(prefixed));
     memcpy(key16, digest, 16);
   } else {
     // CHAN_PRIVATE: fromHex() requires strlen(src) == dest_size*2 (16*2 = 32 hex chars)
@@ -186,56 +171,31 @@ static void _scriptInitChannel(mesh::GroupChannel& ch, ChanType chan_type, const
   memcpy(ch.hash, hash_digest, sizeof(ch.hash));
 }
 
-// Sends a message — supports CHAN_HASH, CHAN_PRIVATE and CHAN_DM
-void MyMesh::_scriptSendMessage(const ScriptRule& rule, const char* text) {
+// Sends a message — supports CHAN_HASH and CHAN_PRIVATE
+void MyMesh::_scriptSendMessage(const ScriptRule &rule, const char *text) {
   uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
   uint8_t temp[128];
   memcpy(temp, &timestamp, 4);
   temp[4] = 0; // TXT_TYPE_PLAIN
-  snprintf((char*)&temp[5], sizeof(temp) - 5, "%s: %s", _prefs.node_name, text);
-  int content_len = strlen((char*)&temp[5]);
+  snprintf((char *)&temp[5], sizeof(temp) - 5, "%s: %s", _prefs.node_name, text);
+  int content_len = strlen((char *)&temp[5]);
 
-  mesh::Packet* pkt = nullptr;
+  mesh::Packet *pkt = nullptr;
 
-  if (rule.chan_type == CHAN_DM) {
-    // Direct message: find peer by pubkey hash and send peer datagram
-    uint8_t dest_hash[4];
-    mesh::Utils::fromHex(dest_hash, sizeof(dest_hash), rule.chan_name);
-    int peer_idx = searchPeersByHash(dest_hash);
-    if (peer_idx < 0) {
-      MESH_DEBUG_PRINTLN("ScriptEngine: DM peer not found: %s", rule.chan_name);
-      return;
-    }
-    uint8_t secret[PUB_KEY_SIZE];
-    getPeerSharedSecret(secret, peer_idx);
-    // Find peer identity via matching_peer_indexes
-    pkt = createDatagram(PAYLOAD_TYPE_TXT_MSG, acl.getClientByIdx(matching_peer_indexes[peer_idx])->id,
-                         secret, temp, 5 + content_len);
-    if (pkt) {
-      if (_dmConfig.enabled && _dmConfig.path_len > 0) {
-        uint8_t path_len = ((_dmConfig.path_hash_size - 1) << 6) | (_dmConfig.path_len & 63);
-        sendDirect(pkt, _dmConfig.path, path_len);
-      } else {
-        sendFloodScoped(default_scope, pkt, 0, _prefs.path_hash_mode + 1);
-      }
-    }
-  } else {
-    // Group channel (hash or private)
-    mesh::GroupChannel ch;
-    _scriptInitChannel(ch, rule.chan_type, rule.chan_name);
-    pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, ch, temp, 5 + content_len);
-    if (pkt) {
-      if (rule.zero_hop) {
-        sendZeroHop(pkt);
-      } else if (rule.scope_name[0] != 0) {
-        TransportKey scope;
-        memset(scope.key, 0, sizeof(scope.key));
-        RegionEntry* region = region_map.findByName(rule.scope_name);
-        if (region) region_map.getTransportKeysFor(*region, &scope, 1);
-        sendFloodScoped(scope, pkt, 0, _prefs.path_hash_mode + 1);
-      } else {
-        sendFloodScoped(default_scope, pkt, 0, _prefs.path_hash_mode + 1);
-      }
+  mesh::GroupChannel ch;
+  _scriptInitChannel(ch, rule.chan_type, rule.chan_name);
+  pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, ch, temp, 5 + content_len);
+  if (pkt) {
+    if (rule.zero_hop) {
+      sendZeroHop(pkt);
+    } else if (rule.scope_name[0] != 0) {
+      TransportKey scope;
+      memset(scope.key, 0, sizeof(scope.key));
+      RegionEntry *region = region_map.findByName(rule.scope_name);
+      if (region) region_map.getTransportKeysFor(*region, &scope, 1);
+      sendFloodScoped(scope, pkt, 0, _prefs.path_hash_mode + 1);
+    } else {
+      sendFloodScoped(default_scope, pkt, 0, _prefs.path_hash_mode + 1);
     }
   }
   MESH_DEBUG_PRINTLN("ScriptEngine: sent '%s'", text);
@@ -248,13 +208,13 @@ void MyMesh::_scriptSendMessage(const ScriptRule& rule, const char* text) {
 void MyMesh::_scriptEvaluate() {
   if (_scriptRuleCount == 0) return;
 
-  uint32_t now       = getRTCClock()->getCurrentTime();
-  uint16_t bat_mv    = board.getBattMilliVolts();
-  float    temp_f    = board.getMCUTemperature();     // NaN if not supported by target
-  int16_t  noise_dbm = (int16_t)_radio->getNoiseFloor();
+  uint32_t now = getRTCClock()->getCurrentTime();
+  uint16_t bat_mv = board.getBattMilliVolts();
+  float temp_f = board.getMCUTemperature(); // NaN if not supported by target
+  int16_t noise_dbm = (int16_t)_radio->getNoiseFloor();
 
   for (uint8_t i = 0; i < _scriptRuleCount; i++) {
-    ScriptRule& r = _scriptRules[i];
+    ScriptRule &r = _scriptRules[i];
     if (!r.enabled) continue;
 
     // Enforce minimum interval
@@ -264,98 +224,104 @@ void MyMesh::_scriptEvaluate() {
     // If at_hour is set, only fire within the correct minute window.
     // Reuse already-fetched timestamp (now) to avoid a second RTC call.
     if (r.at_hour != -1) {
-      uint8_t cur_hour   = (now % 86400) / 3600;
-      uint8_t cur_minute = (now % 3600)  / 60;
+      uint8_t cur_hour = (now % 86400) / 3600;
+      uint8_t cur_minute = (now % 3600) / 60;
       if (cur_hour != (uint8_t)r.at_hour || cur_minute != (uint8_t)r.at_minute) continue;
     }
 
     // Evaluate trigger
     bool fire = false;
     int16_t actual_value = 0;
-    const char* unit = "";
+    const char *unit = "";
 
     switch (r.trigger) {
-      case TRIGGER_BAT_BELOW:
+    case TRIGGER_BAT_BELOW:
+      actual_value = (int16_t)bat_mv;
+      unit = "mV";
+      fire = (bat_mv < (uint16_t)r.trigger_value);
+      break;
+
+    case TRIGGER_BAT_ABOVE:
+      actual_value = (int16_t)bat_mv;
+      unit = "mV";
+      fire = (bat_mv > (uint16_t)r.trigger_value);
+      break;
+
+    case TRIGGER_TEMP_BELOW:
+      if (isnan(temp_f)) break;
+      actual_value = (int16_t)temp_f;
+      unit = "C";
+      fire = (actual_value < r.trigger_value);
+      break;
+
+    case TRIGGER_TEMP_ABOVE:
+      if (isnan(temp_f)) break;
+      actual_value = (int16_t)temp_f;
+      unit = "C";
+      fire = (actual_value > r.trigger_value);
+      break;
+
+    case TRIGGER_NOISE_ABOVE:
+      actual_value = noise_dbm;
+      unit = "dBm";
+      fire = (noise_dbm > r.trigger_value);
+      break;
+
+    case TRIGGER_NOISE_BELOW:
+      actual_value = noise_dbm;
+      unit = "dBm";
+      fire = (noise_dbm < r.trigger_value);
+      break;
+
+    case TRIGGER_PERIODIC:
+      switch (r.report_var) {
+      case REPORT_BAT:
         actual_value = (int16_t)bat_mv;
         unit = "mV";
-        fire = (bat_mv < (uint16_t)r.trigger_value);
+        fire = true;
         break;
-
-      case TRIGGER_BAT_ABOVE:
-        actual_value = (int16_t)bat_mv;
-        unit = "mV";
-        fire = (bat_mv > (uint16_t)r.trigger_value);
-        break;
-
-      case TRIGGER_TEMP_BELOW:
-        if (isnan(temp_f)) break;
-        actual_value = (int16_t)temp_f;
-        unit = "C";
-        fire = (actual_value < r.trigger_value);
-        break;
-
-      case TRIGGER_TEMP_ABOVE:
-        if (isnan(temp_f)) break;
-        actual_value = (int16_t)temp_f;
-        unit = "C";
-        fire = (actual_value > r.trigger_value);
-        break;
-
-      case TRIGGER_NOISE_ABOVE:
-        actual_value = noise_dbm;
-        unit = "dBm";
-        fire = (noise_dbm > r.trigger_value);
-        break;
-
-      case TRIGGER_NOISE_BELOW:
-        actual_value = noise_dbm;
-        unit = "dBm";
-        fire = (noise_dbm < r.trigger_value);
-        break;
-
-      case TRIGGER_PERIODIC:
-        switch (r.report_var) {
-          case REPORT_BAT:
-            actual_value = (int16_t)bat_mv;
-            unit = "mV";
-            fire = true;
-            break;
-          case REPORT_TEMP:
-            if (!isnan(temp_f)) {  // only fire if sensor is available
-              actual_value = (int16_t)temp_f;
-              unit = "C";
-              fire = true;
-            }
-            break;
-          case REPORT_NOISE:
-            actual_value = noise_dbm;
-            unit = "dBm";
-            fire = true;
-            break;
+      case REPORT_TEMP:
+        if (!isnan(temp_f)) { // only fire if sensor is available
+          actual_value = (int16_t)temp_f;
+          unit = "C";
+          fire = true;
         }
         break;
+      case REPORT_NOISE:
+        actual_value = noise_dbm;
+        unit = "dBm";
+        fire = true;
+        break;
+      }
+      break;
     }
 
     if (!fire) continue;
 
     // Build message — replace {value} and {unit} in the template
-    const char* tmpl = r.message[0] ? r.message : "{value}{unit}";
+    const char *tmpl = r.message[0] ? r.message : "{value}{unit}";
     char val_str[16];
     snprintf(val_str, sizeof(val_str), "%d", (int)actual_value);
 
     // Manual template substitution without dynamic allocation
     char buf[128];
-    const char* src = tmpl;
-    char* dst = buf;
-    char* end = buf + sizeof(buf) - 1;
+    const char *src = tmpl;
+    char *dst = buf;
+    char *end = buf + sizeof(buf) - 1;
     while (*src && dst < end) {
       if (strncmp(src, "{value}", 7) == 0) {
         size_t vlen = strlen(val_str);
-        if (dst + vlen < end) { memcpy(dst, val_str, vlen); dst += vlen; }
+        if (dst + vlen < end) {
+          memcpy(dst, val_str, vlen);
+          dst += vlen;
+        }
         src += 7;
       } else if (strncmp(src, "{unit}", 6) == 0) {
         size_t ulen = strlen(unit);
-        if (dst + ulen < end) { memcpy(dst, unit, ulen); dst += ulen; }
+        if (dst + ulen < end) {
+          memcpy(dst, unit, ulen);
+          dst += ulen;
+        }
         src += 6;
       } else {
         *dst++ = *src++;
@@ -391,59 +357,65 @@ void MyMesh::_scriptEvaluate() {
 //   report enable <idx>
 //   report disable <idx>
 
-static const char* _triggerName(ScriptTriggerType t, ScriptReportVar rv) {
+static const char *_triggerName(ScriptTriggerType t, ScriptReportVar rv) {
   switch (t) {
-    case TRIGGER_BAT_BELOW:   return "bat<";
-    case TRIGGER_BAT_ABOVE:   return "bat>";
-    case TRIGGER_TEMP_BELOW:  return "temp<";
-    case TRIGGER_TEMP_ABOVE:  return "temp>";
-    case TRIGGER_NOISE_ABOVE: return "noise>";
-    case TRIGGER_NOISE_BELOW: return "noise<";
-    case TRIGGER_PERIODIC:
-      switch (rv) {
-        case REPORT_BAT:   return "report:bat";
-        case REPORT_TEMP:  return "report:temp";
-        case REPORT_NOISE: return "report:noise";
-      }
+  case TRIGGER_BAT_BELOW:
+    return "bat<";
+  case TRIGGER_BAT_ABOVE:
+    return "bat>";
+  case TRIGGER_TEMP_BELOW:
+    return "temp<";
+  case TRIGGER_TEMP_ABOVE:
+    return "temp>";
+  case TRIGGER_NOISE_ABOVE:
+    return "noise>";
+  case TRIGGER_NOISE_BELOW:
+    return "noise<";
+  case TRIGGER_PERIODIC:
+    switch (rv) {
+    case REPORT_BAT:
+      return "report:bat";
+    case REPORT_TEMP:
+      return "report:temp";
+    case REPORT_NOISE:
+      return "report:noise";
+    }
   }
   return "?";
 }
 
-void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sender) {
+void MyMesh::scriptHandleCommand(const char *arg, char *reply, ClientInfo *sender) {
   bool is_remote = (sender != NULL); // Check if commands are from Serial (ClientInfo = NULL).
-  while (*arg == ' ') arg++;  // skip leading spaces
+  while (*arg == ' ')
+    arg++; // skip leading spaces
 
   // ── report list [page] / report list d<n> ────────────────────────────────────
   // "report list"      — compact paged view, page 1
   // "report list 2"    — compact paged view, page 2
   // "report list d1"   — full detail for report n
   if (strncmp(arg, "list", 4) == 0 && (arg[4] == 0 || arg[4] == ' ')) {
-    if (_scriptRuleCount == 0) { strcpy(reply, "No reports"); return; }
+    if (_scriptRuleCount == 0) {
+      strcpy(reply, "No reports");
+      return;
+    }
     if (!is_remote) {
       // Serial CLI full output — no size limit
       for (uint8_t i = 0; i < _scriptRuleCount; i++) {
-        const ScriptRule& r = _scriptRules[i];
+        const ScriptRule &r = _scriptRules[i];
         char at_buf[12] = "";
         if (r.at_hour != -1) snprintf(at_buf, sizeof(at_buf), " at:%02d:%02d", r.at_hour, r.at_minute);
-        const char* ct = r.chan_type == CHAN_HASH ? "hash" : (r.chan_type == CHAN_DM ? "dm" : "private");
-        Serial.printf("%d:%s %s/%us%s @%s:%s%s%s%s \"%s\"\n",
-          i + 1,
-          r.enabled ? "on" : "off",
-          _triggerName(r.trigger, r.report_var),
-          r.interval_secs,
-          at_buf,
-          ct,
-          r.chan_name,
-          r.zero_hop ? " @zerohop" : "",
-          r.scope_name[0] ? " @scope:" : "",
-          r.scope_name[0] ? r.scope_name : "",
-          r.message);
+        const char *ct = r.chan_type == CHAN_HASH ? "hash" : "private";
+        Serial.printf("%d:%s %s/%us%s @%s:%s%s%s%s \"%s\"\n", i + 1, r.enabled ? "on" : "off",
+                      _triggerName(r.trigger, r.report_var), r.interval_secs, at_buf, ct, r.chan_name,
+                      r.zero_hop ? " @zerohop" : "", r.scope_name[0] ? " @scope:" : "",
+                      r.scope_name[0] ? r.scope_name : "", r.message);
       }
       reply[0] = '\0';
       return;
     } else {
-      const char* list_arg = arg + 4;
-      while (*list_arg == ' ') list_arg++;
+      const char *list_arg = arg + 4;
+      while (*list_arg == ' ')
+        list_arg++;
 
       // ── Detail view: report list d<n> ──────────────────────────────────────
       if (list_arg[0] == 'd') {
@@ -452,23 +424,14 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
           snprintf(reply, 160, "Err - invalid index (1..%d)", (int)_scriptRuleCount);
           return;
         }
-        const ScriptRule& r = _scriptRules[idx];
+        const ScriptRule &r = _scriptRules[idx];
         char at_buf[12] = "";
         if (r.at_hour != -1) snprintf(at_buf, sizeof(at_buf), " at:%02d:%02d", r.at_hour, r.at_minute);
-        const char* dct = r.chan_type == CHAN_HASH ? "hash" : (r.chan_type == CHAN_DM ? "dm" : "private");
-        snprintf(reply, 160,
-          "%d:%s %s/%us%s @%s:%s%s%s%s \"%s\"",
-          idx + 1,
-          r.enabled ? "on" : "off",
-          _triggerName(r.trigger, r.report_var),
-          r.interval_secs,
-          at_buf,
-          dct,
-          r.chan_name,
-          r.zero_hop ? " @zerohop" : "",
-          r.scope_name[0] ? " @scope:" : "",
-          r.scope_name[0] ? r.scope_name : "",
-          r.message);
+        const char *dct = r.chan_type == CHAN_HASH ? "hash" : "private";
+        snprintf(reply, 160, "%d:%s %s/%us%s @%s:%s%s%s%s \"%s\"", idx + 1, r.enabled ? "on" : "off",
+                 _triggerName(r.trigger, r.report_var), r.interval_secs, at_buf, dct, r.chan_name,
+                 r.zero_hop ? " @zerohop" : "", r.scope_name[0] ? " @scope:" : "",
+                 r.scope_name[0] ? r.scope_name : "", r.message);
         return;
       }
 
@@ -500,14 +463,12 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
       if (end > (int)_scriptRuleCount) end = (int)_scriptRuleCount;
 
       for (int i = start; i < end; i++) {
-        const ScriptRule& r = _scriptRules[i];
+        const ScriptRule &r = _scriptRules[i];
 
         // Channel: @h:name, @p:first4.. or @dm:first4..
         char chan_buf[14];
         if (r.chan_type == CHAN_HASH) {
           snprintf(chan_buf, sizeof(chan_buf), "@h:%.7s", r.chan_name);
-        } else if (r.chan_type == CHAN_DM) {
-          snprintf(chan_buf, sizeof(chan_buf), "@dm:%.6s", r.chan_name);
         } else {
           snprintf(chan_buf, sizeof(chan_buf), "@p:%.4s..", r.chan_name);
         }
@@ -524,15 +485,8 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
           snprintf(sc_buf, sizeof(sc_buf), " @s:%.6s", r.scope_name);
         }
 
-        len += snprintf(reply + len, 160 - len,
-          "%d:%s %s/%u %s%s%s\n",
-          i + 1,
-          r.enabled ? "on" : "off",
-          _triggerName(r.trigger, r.report_var),
-          r.interval_secs,
-          chan_buf,
-          at_buf,
-          sc_buf);
+        len += snprintf(reply + len, 160 - len, "%d:%s %s/%u %s%s%s\n", i + 1, r.enabled ? "on" : "off",
+                        _triggerName(r.trigger, r.report_var), r.interval_secs, chan_buf, at_buf, sc_buf);
 
         if (len >= 155) break;
       }
@@ -544,14 +498,14 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
   if (strcmp(arg, "clear") == 0) {
     _scriptRuleCount = 0;
     memset(_scriptRules, 0, sizeof(_scriptRules));
-    _scriptRulesDirty = true;  // deferred save — avoids blocking CLI on nRF52
+    _scriptRulesDirty = true; // deferred save — avoids blocking CLI on nRF52
     strcpy(reply, "OK - all rules cleared");
     return;
   }
 
   // ── report del <n> ──────────────────────────────────────────────────────────
   if (strncmp(arg, "del ", 4) == 0) {
-    int idx = atoi(arg + 4) - 1;  // convert 1-based to 0-based
+    int idx = atoi(arg + 4) - 1; // convert 1-based to 0-based
     if (idx < 0 || idx >= (int)_scriptRuleCount) {
       snprintf(reply, 160, "Err - invalid index (1..%d)", (int)_scriptRuleCount);
       return;
@@ -561,7 +515,7 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
       _scriptRules[j] = _scriptRules[j + 1];
     }
     _scriptRuleCount--;
-    _scriptRulesDirty = true;  // deferred save — avoids blocking CLI on nRF52
+    _scriptRulesDirty = true; // deferred save — avoids blocking CLI on nRF52
     snprintf(reply, 160, "OK - rule %d deleted", idx + 1);
     return;
   }
@@ -575,7 +529,7 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
       return;
     }
     _scriptRules[idx].enabled = en;
-    _scriptRulesDirty = true;  // deferred save — avoids blocking CLI on nRF52
+    _scriptRulesDirty = true; // deferred save — avoids blocking CLI on nRF52
     snprintf(reply, 160, "OK - rule %d %s", idx + 1, en ? "enabled" : "disabled");
     return;
   }
@@ -601,7 +555,7 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
       return;
     }
 
-    const char* p = arg + 4;
+    const char *p = arg + 4;
     ScriptRule r;
     memset(&r, 0, sizeof(r));
     r.enabled = true;
@@ -612,27 +566,35 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
     if (strncmp(p, "report:", 7) == 0) {
       r.trigger = TRIGGER_PERIODIC;
       p += 7;
-      if      (strncmp(p, "bat",   3) == 0) { r.report_var = REPORT_BAT;   p += 3; }
-      else if (strncmp(p, "temp",  4) == 0) { r.report_var = REPORT_TEMP;  p += 4; }
-      else if (strncmp(p, "noise", 5) == 0) { r.report_var = REPORT_NOISE; p += 5; }
-      else { strcpy(reply, "Err - unknown report var (bat/temp/noise)"); return; }
+      if (strncmp(p, "bat", 3) == 0) {
+        r.report_var = REPORT_BAT;
+        p += 3;
+      } else if (strncmp(p, "temp", 4) == 0) {
+        r.report_var = REPORT_TEMP;
+        p += 4;
+      } else if (strncmp(p, "noise", 5) == 0) {
+        r.report_var = REPORT_NOISE;
+        p += 5;
+      } else {
+        strcpy(reply, "Err - unknown report var (bat/temp/noise)");
+        return;
+      }
     } else {
       // Detect variable and operator
-      const char* ops[] = { "bat<", "bat>", "temp<", "temp>", "noise>", "noise<" };
-      ScriptTriggerType types[] = {
-        TRIGGER_BAT_BELOW, TRIGGER_BAT_ABOVE,
-        TRIGGER_TEMP_BELOW, TRIGGER_TEMP_ABOVE,
-        TRIGGER_NOISE_ABOVE, TRIGGER_NOISE_BELOW
-      };
+      const char *ops[] = { "bat<", "bat>", "temp<", "temp>", "noise>", "noise<" };
+      ScriptTriggerType types[] = { TRIGGER_BAT_BELOW,  TRIGGER_BAT_ABOVE,   TRIGGER_TEMP_BELOW,
+                                    TRIGGER_TEMP_ABOVE, TRIGGER_NOISE_ABOVE, TRIGGER_NOISE_BELOW };
       bool found = false;
       for (int k = 0; k < 6; k++) {
         size_t olen = strlen(ops[k]);
         if (strncmp(p, ops[k], olen) == 0) {
-          r.trigger       = types[k];
+          r.trigger = types[k];
           r.trigger_value = (int16_t)atoi(p + olen);
           p += olen;
-          while (*p && *p != ' ') p++;  // skip past the number
-          found = true; break;
+          while (*p && *p != ' ')
+            p++; // skip past the number
+          found = true;
+          break;
         }
       }
       if (!found) {
@@ -642,25 +604,36 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
     }
 
     // Parse interval: /NNNN (seconds)
-    while (*p == ' ') p++;
-    if (*p != '/') { strcpy(reply, "Err - expected /interval_secs"); return; }
+    while (*p == ' ')
+      p++;
+    if (*p != '/') {
+      strcpy(reply, "Err - expected /interval_secs");
+      return;
+    }
     p++;
     r.interval_secs = (uint32_t)atoi(p);
     if (r.interval_secs < SCRIPT_MIN_INTERVAL_SECS) {
-      snprintf(reply, 160, "Err - interval min %d secs (%d min)",
-               SCRIPT_MIN_INTERVAL_SECS, SCRIPT_MIN_INTERVAL_SECS / 60);
+      snprintf(reply, 160, "Err - interval min %d secs (%d min)", SCRIPT_MIN_INTERVAL_SECS,
+               SCRIPT_MIN_INTERVAL_SECS / 60);
       return;
     }
-    while (*p && *p != ' ') p++;  // skip past the number
+    while (*p && *p != ' ')
+      p++; // skip past the number
 
     // Parse channel: @hash:NAME, @private:KEY or @dm:PUBHASH
     // Skip optional at:HH:MM token if it appears before the channel
-    while (*p == ' ') p++;
+    while (*p == ' ')
+      p++;
     if (strncmp(p, "at:", 3) == 0) {
-      while (*p && *p != ' ') p++;  // skip past at:HH:MM
-      while (*p == ' ') p++;
+      while (*p && *p != ' ')
+        p++; // skip past at:HH:MM
+      while (*p == ' ')
+        p++;
     }
-    if (*p != '@') { strcpy(reply, "Err - expected @hash:NAME, @private:KEY or @dm:PUBHASH"); return; }
+    if (*p != '@') {
+      strcpy(reply, "Err - expected @hash:NAME, @private:KEY or @dm:PUBHASH");
+      return;
+    }
     p++;
     if (strncmp(p, "hash:", 5) == 0) {
       r.chan_type = CHAN_HASH;
@@ -668,11 +641,8 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
     } else if (strncmp(p, "private:", 8) == 0) {
       r.chan_type = CHAN_PRIVATE;
       p += 8;
-    } else if (strncmp(p, "dm:", 3) == 0) {
-      r.chan_type = CHAN_DM;
-      p += 3;
     } else {
-      strcpy(reply, "Err - expected @hash:NAME, @private:KEY or @dm:PUBHASH");
+      strcpy(reply, "Err - expected @hash:NAME or @private:KEY");
       return;
     }
     // Channel name/key runs until next space
@@ -681,16 +651,19 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
       r.chan_name[ci++] = *p++;
     }
     r.chan_name[ci] = 0;
-    if (ci == 0) { strcpy(reply, "Err - empty channel name/key"); return; }
+    if (ci == 0) {
+      strcpy(reply, "Err - empty channel name/key");
+      return;
+    }
 
     // Parse optional @zerohop token
     if (strstr(p, "@zerohop")) r.zero_hop = true;
 
     // Parse optional @scope:NAME token anywhere in remaining input
     {
-      const char* scope_tok = strstr(p, "@scope:");
+      const char *scope_tok = strstr(p, "@scope:");
       if (scope_tok) {
-        scope_tok += 7;  // skip "@scope:"
+        scope_tok += 7; // skip "@scope:"
         int si = 0;
         while (*scope_tok && *scope_tok != ' ' && *scope_tok != '"' && si < (int)sizeof(r.scope_name) - 1) {
           r.scope_name[si++] = *scope_tok++;
@@ -703,23 +676,23 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
     // before parsing the message, so p still covers the whole tail.
     // Use " at:" prefix to avoid false matches inside channel names.
     {
-      const char* at_tok = strstr(p, " at:");
+      const char *at_tok = strstr(p, " at:");
       if (at_tok) {
-        at_tok += 4;  // skip " at:"
+        at_tok += 4; // skip " at:"
         int hh = atoi(at_tok);
-        const char* colon = strchr(at_tok, ':');
+        const char *colon = strchr(at_tok, ':');
         int mm = colon ? atoi(colon + 1) : 0;
         if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
-          r.at_hour   = (int8_t)hh;
+          r.at_hour = (int8_t)hh;
           r.at_minute = (int8_t)mm;
         }
       }
     }
 
     // Parse optional message template (quoted)
-    const char* msg = strchr(p, '"');
+    const char *msg = strchr(p, '"');
     if (msg) {
-      msg++;  // skip opening quote
+      msg++; // skip opening quote
       int mi = 0;
       while (*msg && *msg != '"' && mi < (int)sizeof(r.message) - 1) {
         r.message[mi++] = *msg++;
@@ -731,71 +704,21 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
     }
 
     _scriptRules[_scriptRuleCount++] = r;
-    _scriptRulesDirty = true;  // deferred save — avoids blocking CLI on nRF52
+    _scriptRulesDirty = true; // deferred save — avoids blocking CLI on nRF52
     char at_reply[12] = "";
     if (r.at_hour != -1) snprintf(at_reply, sizeof(at_reply), " at:%02d:%02d", r.at_hour, r.at_minute);
-    const char* ctype_str = r.chan_type == CHAN_HASH ? "hash" : (r.chan_type == CHAN_DM ? "dm" : "private");
-    snprintf(reply, 160, "OK - rule %d added: %s/%us%s @%s:%s%s%s",
-             (int)_scriptRuleCount,
-             _triggerName(r.trigger, r.report_var),
-             r.interval_secs,
-             at_reply,
-             ctype_str,
-             r.chan_name,
-             r.scope_name[0] ? " @scope:" : "",
-             r.scope_name[0] ? r.scope_name : "");
-    return;
-  }
-
-  // ── report dm path set/clear/show ────────────────────────────────────────
-  if (strncmp(arg, "dm", 2) == 0 && (arg[2] == 0 || arg[2] == ' ')) {
-    const char* sub = arg + 2;
-    while (*sub == ' ') sub++;
-
-    if (strncmp(sub, "path set ", 9) == 0) {
-      const char* hex = sub + 9;
-      while (*hex == ' ') hex++;
-      memset(_dmConfig.path, 0, sizeof(_dmConfig.path));
-      // Count hex pairs to determine path_len
-      int hexlen = 0;
-      const char* h = hex;
-      while (h[0] && h[1] && hexlen < MAX_DM_PATH_LEN) { hexlen++; h += 2; }
-      _dmConfig.path_len = hexlen;
-      mesh::Utils::fromHex(_dmConfig.path, hexlen, hex);
-      _dmConfig.path_hash_size = 1;  // default — user can override
-      _dmConfig.enabled = (_dmConfig.path_len > 0);
-      _scriptRulesDirty = true;
-      snprintf(reply, 160, "OK - DM path set (%d bytes)", (int)_dmConfig.path_len);
-      return;
-    }
-
-    if (strncmp(sub, "path clear", 10) == 0) {
-      memset(&_dmConfig, 0, sizeof(_dmConfig));
-      _dmConfig.path_hash_size = 1;
-      _scriptRulesDirty = true;
-      strcpy(reply, "OK - DM path cleared");
-      return;
-    }
-
-    if (strncmp(sub, "show", 4) == 0) {
-      if (!_dmConfig.enabled || _dmConfig.path_len == 0) {
-        strcpy(reply, "DM path: not set (will use flood)");
-      } else {
-        char hex[MAX_DM_PATH_LEN * 2 + 1];
-        mesh::Utils::toHex(hex, _dmConfig.path, _dmConfig.path_len);
-        snprintf(reply, 160, "DM path: %s (%d hops)", hex, (int)_dmConfig.path_len);
-      }
-      return;
-    }
-
-    strcpy(reply, "Err - usage: report dm <path set <hex>|path clear|show>");
+    const char *ctype_str = r.chan_type == CHAN_HASH ? "hash" : "private";
+    snprintf(reply, 160, "OK - rule %d added: %s/%us%s @%s:%s%s%s", (int)_scriptRuleCount,
+             _triggerName(r.trigger, r.report_var), r.interval_secs, at_reply, ctype_str, r.chan_name,
+             r.scope_name[0] ? " @scope:" : "", r.scope_name[0] ? r.scope_name : "");
     return;
   }
 
   // ── report boot set/clear/show ───────────────────────────────────────────
   if (strncmp(arg, "boot", 4) == 0 && (arg[4] == 0 || arg[4] == ' ')) {
-    const char* sub = arg + 4;
-    while (*sub == ' ') sub++;
+    const char *sub = arg + 4;
+    while (*sub == ' ')
+      sub++;
 
     if (strncmp(sub, "clear", 5) == 0) {
       memset(&_bootConfig, 0, sizeof(_bootConfig));
@@ -808,53 +731,64 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
       if (!_bootConfig.enabled || _bootConfig.chan_name[0] == 0) {
         strcpy(reply, "Boot message: not set");
       } else {
-        const char* ct = _bootConfig.chan_type == CHAN_HASH ? "hash" :
-                         (_bootConfig.chan_type == CHAN_DM ? "dm" : "private");
-        snprintf(reply, 160, "Boot: @%s:%s%s%s \"%s\"", ct, _bootConfig.chan_name, _bootConfig.zero_hop ? " @zerohop" : "", _bootConfig.scope_name[0] ? " @scope:" : "", _bootConfig.scope_name[0] ? _bootConfig.scope_name : "", _bootConfig.message);
+        const char *ct = _bootConfig.chan_type == CHAN_HASH ? "hash" : "private";
+        snprintf(reply, 160, "Boot: @%s:%s%s%s \"%s\"", ct, _bootConfig.chan_name,
+                 _bootConfig.zero_hop ? " @zerohop" : "", _bootConfig.scope_name[0] ? " @scope:" : "",
+                 _bootConfig.scope_name[0] ? _bootConfig.scope_name : "", _bootConfig.message);
       }
       return;
     }
 
     if (strncmp(sub, "set ", 4) == 0) {
-      const char* p = sub + 4;
+      const char *p = sub + 4;
       memset(&_bootConfig, 0, sizeof(_bootConfig));
 
       // Parse @zerohop
       if (strstr(p, "@zerohop")) _bootConfig.zero_hop = true;
 
       // Parse @scope:NAME
-      const char* scope_tok = strstr(p, "@scope:");
+      const char *scope_tok = strstr(p, "@scope:");
       if (scope_tok) {
         scope_tok += 7;
         int si = 0;
-        while (*scope_tok && *scope_tok != ' ' && *scope_tok != '"' && si < (int)sizeof(_bootConfig.scope_name) - 1) {
+        while (*scope_tok && *scope_tok != ' ' && *scope_tok != '"' &&
+               si < (int)sizeof(_bootConfig.scope_name) - 1) {
           _bootConfig.scope_name[si++] = *scope_tok++;
         }
         _bootConfig.scope_name[si] = 0;
       }
 
       // Parse channel: @hash:NAME, @private:KEY or @dm:PUBHASH
-      while (*p == ' ') p++;
-      if (*p != '@') { strcpy(reply, "Err - expected @hash:NAME, @private:KEY or @dm:PUBHASH"); return; }
+      while (*p == ' ')
+        p++;
+      if (*p != '@') {
+        strcpy(reply, "Err - expected @hash:NAME, @private:KEY or @dm:PUBHASH");
+        return;
+      }
       p++;
       if (strncmp(p, "hash:", 5) == 0) {
-        _bootConfig.chan_type = CHAN_HASH; p += 5;
+        _bootConfig.chan_type = CHAN_HASH;
+        p += 5;
       } else if (strncmp(p, "private:", 8) == 0) {
-        _bootConfig.chan_type = CHAN_PRIVATE; p += 8;
-      } else if (strncmp(p, "dm:", 3) == 0) {
-        _bootConfig.chan_type = CHAN_DM; p += 3;
+        _bootConfig.chan_type = CHAN_PRIVATE;
+        p += 8;
       } else {
-        strcpy(reply, "Err - expected @hash:NAME, @private:KEY or @dm:PUBHASH"); return;
+        strcpy(reply, "Err - expected @hash:NAME or @private:KEY");
+        return;
       }
       int ci = 0;
       while (*p && *p != ' ' && ci < (int)sizeof(_bootConfig.chan_name) - 1) {
         _bootConfig.chan_name[ci++] = *p++;
       }
       _bootConfig.chan_name[ci] = 0;
-      if (ci == 0) { strcpy(reply, "Err - empty channel name/key"); return; }
+      if (ci == 0) {
+        strcpy(reply, "Err - empty channel name/key");
+        return;
+      }
 
       // Parse message
-      while (*p == ' ') p++;
+      while (*p == ' ')
+        p++;
       if (*p == '"') {
         p++;
         int mi = 0;
@@ -871,9 +805,9 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
 
       _bootConfig.enabled = true;
       _scriptRulesDirty = true;
-      const char* ct = _bootConfig.chan_type == CHAN_HASH ? "hash" :
-                       (_bootConfig.chan_type == CHAN_DM ? "dm" : "private");
-      snprintf(reply, 160, "OK - boot set: @%s:%s%s \"%s\"", ct, _bootConfig.chan_name, _bootConfig.zero_hop ? " @zerohop" : "", _bootConfig.message);
+      const char *ct = _bootConfig.chan_type == CHAN_HASH ? "hash" : "private";
+      snprintf(reply, 160, "OK - boot set: @%s:%s%s \"%s\"", ct, _bootConfig.chan_name,
+               _bootConfig.zero_hop ? " @zerohop" : "", _bootConfig.message);
       return;
     }
 
@@ -882,6 +816,5 @@ void MyMesh::scriptHandleCommand(const char* arg, char* reply, ClientInfo* sende
   }
 
   // ── Unknown sub-command ───────────────────────────────────────────────────
-  strcpy(reply,
-    "Err - usage: report <add|list|del|clear|test|enable|disable|boot|dm>");
+  strcpy(reply, "Err - usage: report <add|list|del|clear|test|enable|disable|boot>");
 }
