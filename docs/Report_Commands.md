@@ -387,74 +387,11 @@ report boot set @hash:alertchan "{reason}"
 
 ---
 
-## Direct Messages (`@dm:`)
-
-The `@dm:` channel type sends a direct peer-to-peer message to a specific node, identified by its pubkey hash as shown in the companion app. It can be used in `report add` and `report boot set` just like `@hash:` and `@private:`.
-
-```
-report add bat<3400 /1800 @dm:a3f2e1b4 "Battery low: {value}{unit}"
-report add report:bat /3600 @dm:a3f2e1b4 "Bat: {value}{unit}"
-report boot set @dm:a3f2e1b4 "Rebooted"
-```
-
-By default, DM messages are sent via flood (the node will receive it if reachable). If a direct path to the destination is known, it can be set once and reused for all `@dm:` sends.
-
-> **Note:** If the peer is not found in the node's contact list at send time, the message is silently dropped. Run a discovery first to ensure the peer is known.
-
----
-
-## DM Path
-
-The optional DM path is a global setting that applies to all `@dm:` sends — both rules and the boot message. If no path is set, `@dm:` messages are sent via flood.
-
-The path is a hex string of the raw path bytes as used internally by MeshCore. Each hop in the path occupies 1, 2 or 3 bytes depending on the ID mode configured on the network:
-
-| ID mode | Bytes per hop | Max hops (16 byte limit) |
-|---|---|---|
-| 1-byte | 1 byte | 16 hops |
-| 2-byte | 2 bytes | 8 hops |
-| 3-byte | 3 bytes | 5 hops |
-
-The path bytes can be read from a `trace` command output or from the companion app. The path is stored as-is and passed directly to `sendDirect()`.
-
-> **Note:** The path must match the ID mode of the network. A path recorded in 1-byte mode will not work correctly on a 2-byte network.
-
-### `report dm path set <hex>`
-
-```
-report dm path set 0a1b2c3d          ← 4 hops, 1-byte ID mode
-report dm path set 0a1b2c3d4e5f6a7b  ← 4 hops, 2-byte ID mode
-```
-
-### `report dm path clear`
-
-Clears the path — subsequent `@dm:` sends use flood.
-
-```
-report dm path clear
-```
-
-### `report dm show`
-
-Shows the current DM path and hop count.
-
-```
-report dm show
-```
-
-Example output:
-```
-DM path: 0a1b2c3d (4 hops)
-```
-
----
-
 ## Channel Type Summary
 
 | Token | Type | Description |
 |---|---|---|
 | `@hash:name` | Hash channel | Public hashtag channel — `#name` |
 | `@private:hexkey` | Private channel | Key-protected channel (32 hex chars) |
-| `@dm:pubhash` | Direct message | Peer-to-peer to a specific node |
 
-All three channel types support `@scope:`, `@zerohop` and `at:HH:MM` where applicable. `@zerohop` and `@dm:` can be combined — the message is sent zero-hop to the peer if they are a direct neighbor.
+Both channel types support `@scope:`, `@zerohop` and `at:HH:MM`.
