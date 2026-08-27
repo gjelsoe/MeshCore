@@ -31,7 +31,7 @@ flash so it survives a reboot.
 ```
 cron add cad off time:21
 cron add cad on time:6 persist
-cron add owner dave's repeater - Houston, TX time:3:30
+cron add owner Dave's repeater - Houston, TX time:3:30
 ```
 
 Reply on success: `OK - cron #<id> added: <key>=<value> at HH:MM (persist:yes|no)`
