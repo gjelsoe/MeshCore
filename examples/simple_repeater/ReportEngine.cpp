@@ -1,3 +1,4 @@
+#if defined(REPORT_ENGINE)
 // ReportEngine.cpp
 //
 // Implements load/save, CLI parser and evaluation of script rules.
@@ -818,3 +819,4 @@ void MyMesh::scriptHandleCommand(const char *arg, char *reply, ClientInfo *sende
   // ── Unknown sub-command ───────────────────────────────────────────────────
   strcpy(reply, "Err - usage: report <add|list|del|clear|test|enable|disable|boot>");
 }
+#endif

@@ -1021,10 +1021,11 @@ void MyMesh::begin(FILESYSTEM *fs) {
   updateFloodAdvertTimer();
 
   board.setAdcMultiplier(_prefs.adc_multiplier);
-
+#if defined(REPORT_ENGINE)
   _scriptLoad();
   _nextScriptEval = futureMillis(60000UL);  // first evaluation after 60s
   _nextBootMsg    = futureMillis(15000UL);  // boot message after 15s
+#endif
 
 #if ENV_INCLUDE_GPS == 1
   applyGpsPrefs();
@@ -1447,10 +1448,12 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char *
       sendNodeDiscoverReq();
       strcpy(reply, "OK - Discover sent");
     }
+#if defined(REPORT_ENGINE)
   } else if (memcmp(command, "report", 6) == 0) {
     const char* arg = command + 6;
     while (*arg == ' ') arg++;
     scriptHandleCommand(arg, reply, sender);
+#endif
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
@@ -1490,7 +1493,7 @@ void MyMesh::loop() {
     applyRxPowerSavingConfig(_prefs, _prefs.sf, _prefs.bw);
     MESH_DEBUG_PRINTLN("Radio params restored");
   }
-
+#if defined(REPORT_ENGINE)
   // report engine: send boot message once after startup delay
   if (_nextBootMsg && millisHasNowPassed(_nextBootMsg)) {
     _nextBootMsg = 0;
@@ -1508,7 +1511,7 @@ void MyMesh::loop() {
     _nextScriptEval = futureMillis(60000UL);
     _scriptEvaluate();
   }
-
+#endif
   // is pending dirty contacts write needed?
   if (dirty_contacts_expiry && millisHasNowPassed(dirty_contacts_expiry)) {
     acl.save(_fs);
