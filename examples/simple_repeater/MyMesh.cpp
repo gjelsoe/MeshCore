@@ -589,13 +589,13 @@ mesh::DispatcherAction MyMesh::onRecvPacket(mesh::Packet* pkt) {
     recv_pkt_region = NULL;
 
   }
-#if defined(PACKET_CHANNEL_FILTER)
+
   // Run packet through filter engine
   if (_filter.evaluate(pkt, (int16_t)_radio->getLastRSSI())) {
     MESH_DEBUG_PRINTLN("*** FILTER: packet dropped ***");
     return ACTION_RELEASE;
   }
-#endif
+
   return Mesh::onRecvPacket(pkt);
 }
 
@@ -988,9 +988,8 @@ void MyMesh::begin(FILESYSTEM *fs) {
   acl.load(_fs, self_id);
   // TODO: key_store.begin();
   region_map.load(_fs);
-#if defined(PACKET_CHANNEL_FILTER)
   _filter.load(*_fs);
-#endif
+
   // establish default-scope
   {
     RegionEntry* r = region_map.getDefaultRegion();
@@ -1453,11 +1452,9 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char *
       sendNodeDiscoverReq();
       strcpy(reply, "OK - Discover sent");
     }
-#if defined(PACKET_CHANNEL_FILTER)
   } else if (strncmp(command, "filter", 6) == 0 && (command[6] == ' ' || command[6] == '\0')) {
     const char* filter_args = (command[6] == ' ') ? command + 7 : "";
     _filter.handleCommand(filter_args, reply, *_fs, sender);
-#endif
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
