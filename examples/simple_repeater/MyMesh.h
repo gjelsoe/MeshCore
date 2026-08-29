@@ -264,7 +264,11 @@ public:
 
   bool loadConfigFromStream(Stream& s, ConfigTarget target) {
     switch (target) {
-      case CFG_PREFS:  return _cli.loadConfigFromStream(s);
+      case CFG_PREFS: {
+        bool ok = _cli.loadConfigFromStream(s);
+        if (ok) savePrefs();   // persist to flash, same as any other successful "set"
+        return ok;
+      }
 #ifdef WITH_CHANNEL_FILTER
       case CFG_FILTER: return _filter.loadSerial(s);
 #endif
