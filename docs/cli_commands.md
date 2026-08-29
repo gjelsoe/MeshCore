@@ -12,7 +12,6 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 - [Configuration](#configuration)
   - [Radio](#radio)
   - [System](#system)
-  - [Backup and Restore](#backup-and-restore)
   - [Routing](#routing)
   - [ACL](#acl)
   - [Region Management](#region-management-v110)
@@ -27,7 +26,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ## Operational
 
 ### Reboot the node
-**Usage:**
+**Usage:** 
 - `reboot`
 
 **Note:** No reply is sent.
@@ -52,7 +51,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ---
 
 ### Sync the clock with the remote device
-**Usage:**
+**Usage:** 
 - `clock sync`
 
 ---
@@ -64,7 +63,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ---
 
 ### Set the time to a specific timestamp
-**Usage:**
+**Usage:** 
 - `time <epoch_seconds>`
 
 **Parameters:**
@@ -73,7 +72,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ---
 
 ### Send a flood advert
-**Usage:**
+**Usage:** 
 - `advert`
 
 ---
@@ -103,7 +102,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ## Neighbors (Repeater Only)
 
 ### List nearby neighbors
-**Usage:**
+**Usage:** 
 - `neighbors`
 
 **Note:** The output of this command is limited to the 8 most recent adverts.
@@ -113,10 +112,10 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ---
 
 ### Remove a neighbor
-**Usage:**
+**Usage:** 
 - `neighbor.remove <pubkey_prefix>`
 
-**Parameters:**
+**Parameters:** 
 - `pubkey_prefix`: The public key of the node to remove from the neighbors list. This can be a short prefix or the full key. All neighbors matching the provided prefix will be removed.
 
 **Note:** You can remove all neighbors by sending a space character as the prefix. The space indicates an empty prefix, which matches all existing neighbors.
@@ -125,7 +124,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 
 ### Discover zero hop neighbors
 
-**Usage:**
+**Usage:** 
 - `discover.neighbors`
 
 ---
@@ -138,7 +137,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ---
 
 ### System Stats - Battery, Uptime, Queue Length and Debug Flags
-**Usage:**
+**Usage:** 
 - `stats-core`
 
 **Serial Only:** Yes
@@ -235,7 +234,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ---
 
 #### Change the radio parameters for a set duration
-**Usage:**
+**Usage:** 
 - `tempradio <freq>,<bw>,<sf>,<cr>,<timeout_mins>`
 
 **Parameters:**
@@ -270,7 +269,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 - `set radio.rxgain <state>`
 
 **Parameters:**
-- `state`: `on`|`off`
+  - `state`: `on`|`off`
 
 **Default:** `on`
 
@@ -550,7 +549,7 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 - `powersaving on`
 - `powersaving off`
 
-**Parameters:**
+**Parameters:** 
 - `on`: enable power saving
 - `off`: disable power saving
 
@@ -565,37 +564,10 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 - `get reboot.interval`
 - `set reboot.interval <hours>`
 
-**Parameters:**
+**Parameters:** 
 - `hours`: 0-255. 0 is disabled
 
 **Default:** `0` (disabled)
-
----
-
-### Backup and Restore
-
-#### Dump the full node configuration as JSON
-**Usage:**
-- `get config`
-
-**Serial Only:** Yes
-
-**Note:** Dumps the current in-memory preferences as a single JSON object, written directly to the serial connection instead of the normal reply buffer. Output is not limited by the usual reply size, so a full dump can be considerably longer than other `get` commands.
-
----
-
-#### Load node configuration from JSON
-**Usage:**
-- `put config`
-
-**Serial Only:** Yes
-
-**Parameters:**
-- After sending `put config`, paste a JSON object (for example, output previously captured from `get config`) and end the input with a line containing only `.`
-
-**Note:** Keys not present in the pasted JSON are left unchanged; unrecognized keys are ignored. This makes it safe to paste a partial or hand-edited JSON object back in.
-
-**Note:** On a successful load, the updated preferences are written to flash immediately — no separate save step is needed.
 
 ---
 
@@ -607,7 +579,7 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 - `set repeat <state>`
 
 **Parameters:**
-- `state`: `on`|`off`
+  - `state`: `on`|`off`
 
 **Default:** `on`
 
@@ -623,13 +595,13 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
   - `0`: 1 Byte hash size (256 unique ids)[64 max flood]
   - `1`: 2 Byte hash size (65,536 unique ids)[32 max flood]
   - `2`: 3 Byte hash size (16,777,216 unique ids)[21 max flood]
-  - `3`: DO NOT USE (Reserved)
+  - `3`: DO NOT USE (Reserved) 
 
 **Default:** `0`
 
 **Note:** the 'path.hash.mode' sets the low-level ID/hash encoding size used when the repeater adverts. This setting has no impact on what packet ID/hash size this repeater forwards, all sizes should be forwarded on firmware >= 1.14. This feature was added in firmware 1.14
 
-**Temporary Note:** adverts with ID/hash sizes of 2 or 3 bytes may have limited flood propagation in your network while this feature is new as v1.13.0 firmware and older will drop packets with multibyte path ID/hashes as only 1-byte hashes are supported. Consider your install base of firmware >=1.14 has reached a criticality for effective network flooding before implementing higher ID/hash sizes.
+**Temporary Note:** adverts with ID/hash sizes of 2 or 3 bytes may have limited flood propagation in your network while this feature is new as v1.13.0 firmware and older will drop packets with multibyte path ID/hashes as only 1-byte hashes are supported. Consider your install base of firmware >=1.14 has reached a criticality for effective network flooding before implementing higher ID/hash sizes. 
 
 ---
 
@@ -639,17 +611,17 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 - `set loop.detect <state>`
 
 **Parameters:**
-- `state`:
+- `state`: 
   - `off`: no loop detection is performed
   - `minimal`: packets are dropped if repeater's ID/hash appears 4 or more times (1-byte), 2 or more (2-byte), 1 or more (3-byte)
   - `moderate`: packets are dropped if repeater's ID/hash appears 2 or more times (1-byte), 1 or more (2-byte), 1 or more (3-byte)
   - `strict`: packets are dropped if repeater's ID/hash appears 1 or more times (1-byte), 1 or more (2-byte), 1 or more (3-byte)
-
+  
 **Default:** `off`
 
 **Note:** When it is enabled, repeaters will now reject flood packets which look like they are in a loop. This has been happening recently in some meshes when there is just a single 'bad' repeater firmware out there (probably some forked or custom firmware). If the payload is messed with, then forwarded, the same packet ends up causing a packet storm, repeated up to the max 64 hops. This feature was added in firmware 1.14
 
-**Example:** If preference is `loop.detect minimal`, and a 1-byte path size packet is received, the repeater will see if its own ID/hash is already in the path. If it's already encoded 4 times, it will reject the packet.  If the packet uses 2-byte path size, and repeater's own ID/hash is already encoded 2 times, it rejects. If the packet uses 3-byte path size, and the repeater's own ID/hash is already encoded 1 time, it rejects.
+**Example:** If preference is `loop.detect minimal`, and a 1-byte path size packet is received, the repeater will see if its own ID/hash is already in the path. If it's already encoded 4 times, it will reject the packet.  If the packet uses 2-byte path size, and repeater's own ID/hash is already encoded 2 times, it rejects. If the packet uses 3-byte path size, and the repeater's own ID/hash is already encoded 1 time, it rejects. 
 
 ---
 
@@ -728,7 +700,7 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
   - `af = 2` → ~33% duty
   - `af = 3` → ~25% duty
   - `af = 9` → ~10% duty
-    You are responsible for choosing a value that is appropriate for your jurisdiction and channel plan (for example EU 868 Mhz 10% duty cycle regulation).
+  You are responsible for choosing a value that is appropriate for your jurisdiction and channel plan (for example EU 868 Mhz 10% duty cycle regulation).
 
 **Default:** `1.0`
 
@@ -849,12 +821,12 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 ### ACL
 
 #### Add, update or remove permissions for a companion
-**Usage:**
+**Usage:** 
 - `setperm <pubkey> <permissions>`
 
 **Parameters:**
 - `pubkey`: Companion public key
-- `permissions`:
+- `permissions`: 
   - `0`: Guest
   - `1`: Read-only
   - `2`: Read-write
@@ -865,7 +837,7 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 ---
 
 #### View the current ACL
-**Usage:**
+**Usage:** 
 - `get acl`
 
 **Serial Only:** Yes
@@ -887,7 +859,7 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 ### Region Management (v1.10.+)
 
 #### Bulk-load region lists
-**Usage:**
+**Usage:** 
 - `region load`
 - `region load <name> [flood_flag]`
 
@@ -903,16 +875,16 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 ---
 
 #### Save any changes to regions made since reboot
-**Usage:**
+**Usage:** 
 - `region save`
 
 ---
 
 #### Allow a region
-**Usage:**
+**Usage:** 
 - `region allowf <name>`
 
-**Parameters:**
+**Parameters:** 
 - `name`: Region name (or `*` for wildcard)
 
 **Note:** Setting on wildcard `*` allows packets without region transport codes
@@ -920,10 +892,10 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 ---
 
 #### Block a region
-**Usage:**
+**Usage:** 
 - `region denyf <name>`
 
-**Parameters:**
+**Parameters:** 
 - `name`: Region name (or `*` for wildcard)
 
 **Note:** Setting on wildcard `*` drops packets without region transport codes
@@ -931,7 +903,7 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 ---
 
 #### Show information for a region
-**Usage:**
+**Usage:** 
 - `region get <name>`
 
 **Parameters:**
@@ -940,7 +912,7 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 ---
 
 #### View or change the home region for this node
-**Usage:**
+**Usage:** 
 - `region home`
 - `region home <name>`
 
@@ -950,7 +922,7 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 ---
 
 #### View or change the default scope region for this node
-**Usage:**
+**Usage:** 
 - `region default`
 - `region default {name|<null>}`
 
@@ -981,7 +953,7 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 ---
 
 #### Create a new region
-**Usage:**
+**Usage:** 
 - `region put <name> [parent_name]`
 
 **Parameters:**
@@ -1032,18 +1004,18 @@ region save
 ---
 
 #### Remove a region
-**Usage:**
+**Usage:** 
 - `region remove <name>`
 
 **Parameters:**
 - `name`: Region name
 
-**Note:** Must remove all child regions before the region can be removed
+**Note:** Must remove all child regions before the region can be removed 
 
 ---
 
 #### View all regions
-**Usage:**
+**Usage:** 
 - `region list <filter>`
 
 **Serial Only:** Yes
@@ -1056,7 +1028,7 @@ region save
 ---
 
 #### Dump all defined regions and flood permissions
-**Usage:**
+**Usage:** 
 - `region`
 
 **Serial Only:** For firmware older than 1.12.0
@@ -1170,13 +1142,13 @@ region save
 ---
 
 #### Sync this node's clock with GPS time
-**Usage:**
+**Usage:** 
 - `gps sync`
 
 ---
 
 #### Set this node's location based on the GPS coordinates
-**Usage:**
+**Usage:** 
 - `gps setloc`
 
 ---
@@ -1186,8 +1158,8 @@ region save
 - `gps advert`
 - `gps advert <policy>`
 
-**Parameters:**
-- `policy`: `none`|`share`|`prefs`
+**Parameters:** 
+- `policy`: `none`|`share`|`prefs` 
   - `none`: don't include location in adverts
   - `share`: share gps location (from SensorManager)
   - `prefs`: location stored in node's lat and lon settings
@@ -1209,7 +1181,7 @@ region save
 ---
 
 #### View or change the value of a sensor
-**Usage:**
+**Usage:** 
 - `sensor get <key>`
 - `sensor set <key> <value>`
 
@@ -1256,7 +1228,7 @@ region save
 - `set bridge.source <source>`
 
 **Parameters:**
-- `source`:
+- `source`: 
   - `logRx`: bridges received packets
   - `logTx`: bridges transmitted packets
 
@@ -1287,7 +1259,7 @@ region save
 ---
 
 #### Set the ESP-Now secret
-**Usage:**
+**Usage:** 
 - `get bridge.secret`
 - `set bridge.secret <secret>`
 
