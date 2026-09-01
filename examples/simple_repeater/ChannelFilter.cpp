@@ -1,18 +1,40 @@
-#include "MyMesh.h"
 #include "ChannelFilter.h"
-#include <string.h>
+
+#include "MyMesh.h"
+
 #include <stdio.h>
+#include <string.h>
+
+// Stable rule key strings for JSON serialization (ra..rh for up to 8 rules)
+const char *const kRuleKeys[] = { "ra", "rb", "rc", "rd", "re", "rf", "rg", "rh", "ri",
+                                  "rj", "rk", "rl", "rm", "rn", "ro", "rp", "rq", "rr",
+                                  "rs", "rt", "ru", "rv", "rw", "rx", "ry", "rz" };
 
 // ---------------------------------------------------------------------------
-// Persistence — JSON via ConfigSerializer, with legacy binary migration
+// Helpers shared between FilterProfileSerializer and ChannelFilter
 // ---------------------------------------------------------------------------
 
-ChannelFilter::ChannelFilter() {
-  memset(_rules, 0, sizeof(_rules));
-  _mode = FilterMode::ALLOW;  // safe default: pass all packets if no rules loaded
-  for (int i = 0; i < MAX_FILTER_RULES; i++) {
-    _rule_ser[i].setRule(&_rules[i]);
+static bool applyOp(FilterOp op, int16_t pkt_val, int16_t rule_val) {
+  switch (op) {
+  case FilterOp::EQ:
+    return pkt_val == rule_val;
+  case FilterOp::NEQ:
+    return pkt_val != rule_val;
+  case FilterOp::GT:
+    return pkt_val > rule_val;
+  case FilterOp::LT:
+    return pkt_val < rule_val;
+  default:
+    return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// ChannelFilter — constructor, load, save
+// ---------------------------------------------------------------------------
+
+ChannelFilter::ChannelFilter() : _active(0) {
+  // Profiles initialize themselves in their own constructors
 }
 
 void ChannelFilter::load(FILESYSTEM &fs) {
@@ -27,12 +49,14 @@ void ChannelFilter::load(FILESYSTEM &fs) {
   if (f) {
     loadSerial(f);
     f.close();
+    // Clamp _active to valid range in case of corrupt file
+    if (_active >= MAX_FILTER_PROFILES) _active = 0;
     return;
   }
 
-  // JSON not found — try legacy binary migration
+  // JSON not found — try legacy binary migration (loads into profile 1)
   if (_loadBinary(fs)) {
-    save(fs);  // convert to JSON immediately
+    save(fs);
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
     fs.remove(FILTER_RULES_FILE_BIN);
 #else
@@ -53,9 +77,8 @@ void ChannelFilter::save(FILESYSTEM &fs) const {
 #endif
   if (!f) return;
 
-  // ConfigSerializer::saveSerial() requires a non-const Stream — cast is safe
-  // since saveSerial only writes and does not modify ChannelFilter state.
-  const_cast<ChannelFilter*>(this)->saveSerial(f);
+  // saveSerial() needs non-const — cast is safe: only writes, never modifies state
+  const_cast<ChannelFilter *>(this)->saveSerial(f);
   f.close();
 }
 
@@ -69,70 +92,76 @@ bool ChannelFilter::_loadBinary(FILESYSTEM &fs) {
 #endif
   if (!f) return false;
 
-  // Validate magic byte
   uint8_t magic;
   if (f.read(&magic, 1) != 1 || magic != FILTER_FILE_MAGIC) {
     f.close();
     return false;
   }
 
-  // Validate version — must be >= 3 (channel OR-list struct)
   uint8_t version;
   if (f.read(&version, 1) != 1 || version < FILTER_FILE_VERSION) {
     f.close();
     return false;
   }
 
-  // Read mode byte
   uint8_t mode_byte;
   if (f.read(&mode_byte, 1) != 1) {
     f.close();
     return false;
   }
-  _mode = (mode_byte <= (uint8_t)FilterMode::DROP)
-            ? (FilterMode)mode_byte
-            : FilterMode::ALLOW;
 
-  // Read rules — zero remaining slots if truncated
-  size_t bytes_read = f.read((uint8_t *)_rules, sizeof(_rules));
-  if (bytes_read < sizeof(_rules)) {
-    memset((uint8_t *)_rules + bytes_read, 0, sizeof(_rules) - bytes_read);
-  }
+  // Migrate into profile 1 (index 0)
+  FilterProfileSerializer &p = _profiles[0];
+  p.setMode((mode_byte <= (uint8_t)FilterMode::DROP) ? (FilterMode)mode_byte : FilterMode::ALLOW);
+
+  FilterRule *rules = p.getRules();
+  size_t sz = sizeof(FilterRule) * MAX_FILTER_RULES;
+  size_t bytes_read = f.read((uint8_t *)rules, sz);
+  if (bytes_read < sz) memset((uint8_t *)rules + bytes_read, 0, sz - bytes_read);
   f.close();
+  _active = 0;
   return true;
 }
 
 // ---------------------------------------------------------------------------
-// Evaluation helpers
+// Evaluation
 // ---------------------------------------------------------------------------
 
-static bool applyOp(FilterOp op, int16_t pkt_val, int16_t rule_val) {
-  switch (op) {
-  case FilterOp::EQ:
-    return pkt_val == rule_val;
-  case FilterOp::NEQ:
-    return pkt_val != rule_val;
-  case FilterOp::GT:
-    return pkt_val > rule_val;
-  case FilterOp::LT:
-    return pkt_val < rule_val;
+bool ChannelFilter::_evalScalar(FilterField field, FilterOp op, int16_t val, const mesh::Packet *pkt,
+                                int16_t rssi) const {
+  switch (field) {
+  case FilterField::ROUTE:
+    return applyOp(op, (int16_t)pkt->getRouteType(), val);
+  case FilterField::TYPE:
+    return applyOp(op, (int16_t)pkt->getPayloadType(), val);
+  case FilterField::HOPS:
+    return applyOp(op, (int16_t)pkt->getPathHashCount(), val);
+  case FilterField::PATHSIZE:
+    return applyOp(op, (int16_t)pkt->getPathHashSize(), val);
+  case FilterField::CHANNEL: {
+    uint8_t pt = pkt->getPayloadType();
+    if (pt != 0x05 && pt != 0x06) return false;
+    if (pkt->payload_len < 1) return false;
+    return applyOp(op, (int16_t)pkt->payload[0], val);
+  }
+  case FilterField::SNR:
+    return applyOp(op, (int16_t)pkt->_snr, val);
+  case FilterField::RSSI:
+    return applyOp(op, rssi, val);
   default:
     return false;
   }
 }
 
 bool ChannelFilter::_ruleMatches(const FilterRule &rule, const mesh::Packet *pkt, int16_t rssi) const {
-  // PATH field has its own OR-list logic — handle separately
+  // PATH field — OR-list match on last hop
   if (rule.field == FilterField::PATH) {
     uint8_t hash_size = pkt->getPathHashSize();
     uint8_t hash_count = pkt->getPathHashCount();
-
     if (hash_count == 0) return false;
     if (hash_size != rule.path_hash_len) return false;
-
     uint16_t last_hop_offset = (uint16_t)(hash_count - 1) * hash_size;
     if (last_hop_offset + hash_size > MAX_PATH_SIZE) return false;
-
     const uint8_t *last_hop = pkt->path + last_hop_offset;
     bool found = false;
     for (uint8_t i = 0; i < rule.path_hash_count; i++) {
@@ -141,24 +170,19 @@ bool ChannelFilter::_ruleMatches(const FilterRule &rule, const mesh::Packet *pkt
         break;
       }
     }
-
-    bool primary_match = (rule.op == FilterOp::EQ) ? found : !found;
-    if (!primary_match) return false;
-
-    // AND condition (PATH as primary can still have a scalar AND)
+    bool primary = (rule.op == FilterOp::EQ) ? found : !found;
+    if (!primary) return false;
     if (rule.and_field != FILTER_FIELD_NONE) {
-      if (!_evalScalar((FilterField)rule.and_field, rule.and_op, rule.and_value, pkt, rssi))
-        return false;
+      if (!_evalScalar((FilterField)rule.and_field, rule.and_op, rule.and_value, pkt, rssi)) return false;
     }
     return true;
   }
 
-  // CHANNEL field has OR-list logic
+  // CHANNEL field — OR-list match
   if (rule.field == FilterField::CHANNEL) {
     uint8_t pt = pkt->getPayloadType();
-    if (pt != 0x05 && pt != 0x06) return false;  // GRP_TXT / GRP_DATA only
+    if (pt != 0x05 && pt != 0x06) return false;
     if (pkt->payload_len < 1) return false;
-
     uint8_t ch = pkt->payload[0];
     bool found = false;
     for (uint8_t i = 0; i < rule.channel_hash_count; i++) {
@@ -167,102 +191,48 @@ bool ChannelFilter::_ruleMatches(const FilterRule &rule, const mesh::Packet *pkt
         break;
       }
     }
-
-    bool primary_match;
-    if (rule.op == FilterOp::EQ)       primary_match = found;
-    else if (rule.op == FilterOp::NEQ) primary_match = !found;
-    else return false;  // GT/LT not meaningful for channel OR-list
-
-    if (!primary_match) return false;
-
-    // AND condition for channel primary
+    bool primary;
+    if (rule.op == FilterOp::EQ)
+      primary = found;
+    else if (rule.op == FilterOp::NEQ)
+      primary = !found;
+    else
+      return false;
+    if (!primary) return false;
     if (rule.and_field != FILTER_FIELD_NONE) {
-      if (!_evalScalar((FilterField)rule.and_field, rule.and_op, rule.and_value, pkt, rssi))
-        return false;
+      if (!_evalScalar((FilterField)rule.and_field, rule.and_op, rule.and_value, pkt, rssi)) return false;
     }
     return true;
   }
 
   // Scalar primary condition
   if (!_evalScalar(rule.field, rule.op, rule.value, pkt, rssi)) return false;
-
-  // AND condition if present
   if (rule.and_field != FILTER_FIELD_NONE) {
     if (!_evalScalar((FilterField)rule.and_field, rule.and_op, rule.and_value, pkt, rssi)) return false;
   }
-
   return true;
 }
 
-// Evaluate a single scalar condition against a packet.
-// PATH field is not handled here — it has its own block in the switch above.
-bool ChannelFilter::_evalScalar(FilterField field, FilterOp op, int16_t val,
-                                const mesh::Packet *pkt, int16_t rssi) const {
-  switch (field) {
-  case FilterField::ROUTE:
-    return applyOp(op, (int16_t)pkt->getRouteType(), val);
-
-  case FilterField::TYPE:
-    return applyOp(op, (int16_t)pkt->getPayloadType(), val);
-
-  case FilterField::HOPS:
-    return applyOp(op, (int16_t)pkt->getPathHashCount(), val);
-
-  case FilterField::PATHSIZE:
-    return applyOp(op, (int16_t)pkt->getPathHashSize(), val);
-
-  case FilterField::CHANNEL: {
-    uint8_t pt = pkt->getPayloadType();
-    if (pt != 0x05 && pt != 0x06) return false;
-    if (pkt->payload_len < 1) return false;
-    // OR-match against channel_hashes list — find the rule via pointer arithmetic
-    // Note: val is unused for CHANNEL — match logic uses the rule struct directly.
-    // This case should not be reached via _evalScalar for channel primary field.
-    // It remains here as a safety fallback using val as single-value compare.
-    return applyOp(op, (int16_t)pkt->payload[0], val);
-  }
-
-  case FilterField::SNR:
-    return applyOp(op, (int16_t)pkt->_snr, val);
-
-  case FilterField::RSSI:
-    return applyOp(op, rssi, val);
-
-  default:
-    return false;
-  }
-}
-
 bool ChannelFilter::evaluate(const mesh::Packet *pkt, int16_t rssi) const {
-  if (!pkt) return false; // null guard — pass unknown packets rather than crash
-  for (uint8_t i = 0; i < MAX_FILTER_RULES; i++) {
-    const FilterRule &rule = _rules[i];
-    if (!rule.in_use || !rule.enabled) continue;
+  if (!pkt) return false;
+  const FilterProfileSerializer *prof = &_profiles[_active];
+  const FilterRule *rules = prof->getRules();
 
+  for (uint8_t i = 0; i < MAX_FILTER_RULES; i++) {
+    const FilterRule &rule = rules[i];
+    if (!rule.in_use || !rule.enabled) continue;
     if (_ruleMatches(rule, pkt, rssi)) {
       return rule.action == FilterAction::DROP;
     }
   }
   // No rule matched — apply default policy
-  return _mode == FilterMode::DROP;
+  return prof->getMode() == FilterMode::DROP;
 }
 
 // ---------------------------------------------------------------------------
-// Slot helpers
+// List output helpers
 // ---------------------------------------------------------------------------
 
-int ChannelFilter::_firstFreeSlot() const {
-  for (int i = 0; i < MAX_FILTER_RULES; i++) {
-    if (!_rules[i].in_use) return i;
-  }
-  return -1;
-}
-
-// ---------------------------------------------------------------------------
-// List formatting
-// ---------------------------------------------------------------------------
-
-// Return a short token string for a FilterField value
 static const char *fieldStr(FilterField f) {
   switch (f) {
   case FilterField::ROUTE:
@@ -301,7 +271,6 @@ static const char *opStr(FilterOp op) {
   }
 }
 
-// Translate ROUTE_TYPE_* numeric value to token string
 static const char *routeValueStr(int16_t v) {
   switch (v) {
   case 0x00:
@@ -317,7 +286,6 @@ static const char *routeValueStr(int16_t v) {
   }
 }
 
-// Translate PAYLOAD_TYPE_* numeric value to token string
 static const char *payloadTypeValueStr(int16_t v) {
   switch (v) {
   case 0x00:
@@ -351,7 +319,7 @@ static const char *payloadTypeValueStr(int16_t v) {
   }
 }
 
-static void formatRuleValue(const FilterRule &rule, char *out, int outlen) {
+void ChannelFilter::formatRuleValue(const FilterRule &rule, char *out, int outlen) {
   if (outlen <= 0) return;
   if (rule.field == FilterField::PATH) {
     int pos = 0;
@@ -374,23 +342,15 @@ static void formatRuleValue(const FilterRule &rule, char *out, int outlen) {
     }
     out[pos] = '\0';
   } else if (rule.field == FilterField::SNR) {
-    // Convert stored quarter-dB back to whole dB for display
     snprintf(out, outlen, "%d", (int)(rule.value / 4));
   } else {
     snprintf(out, outlen, "%d", (int)rule.value);
   }
 }
 
-// Maximum reply length — stay safely below the 138-char packet limit
-#define FILTER_REPLY_BUDGET  128
-// Reserved for header and hint line
-#define FILTER_REPLY_HEADER_MAX  32
-#define FILTER_REPLY_HINT_LEN    18  // "-> filter list N\0"
-
-// Format a single rule line into buf (null-terminated). Returns number of chars written.
 static int formatRuleLine(const FilterRule &rule, uint8_t idx, char *buf, int buflen) {
   char val_buf[32];
-  formatRuleValue(rule, val_buf, (int)sizeof(val_buf));
+  ChannelFilter::formatRuleValue(rule, val_buf, (int)sizeof(val_buf));
 
   char and_buf[48] = "";
   if (rule.and_field != FILTER_FIELD_NONE) {
@@ -407,109 +367,103 @@ static int formatRuleLine(const FilterRule &rule, uint8_t idx, char *buf, int bu
     } else {
       snprintf(and_val_buf, sizeof(and_val_buf), "%d", (int)rule.and_value);
     }
-    snprintf(and_buf, sizeof(and_buf), " and %s %s %s",
-             fieldStr(af), opStr(rule.and_op), and_val_buf);
+    snprintf(and_buf, sizeof(and_buf), " and %s %s %s", fieldStr(af), opStr(rule.and_op), and_val_buf);
   }
 
-  return snprintf(buf, buflen, "%d%s %s %s %s %s%s\n",
-                  idx,
-                  rule.enabled ? "" : "*",
-                  rule.action == FilterAction::DROP ? "drop" : "allow",
-                  fieldStr(rule.field),
-                  opStr(rule.op),
-                  val_buf,
-                  and_buf
-      );
+  return snprintf(buf, buflen, "%d%s %s %s %s %s%s\n", idx, rule.enabled ? "" : "*",
+                  rule.action == FilterAction::DROP ? "drop" : "allow", fieldStr(rule.field), opStr(rule.op),
+                  val_buf, and_buf);
 }
 
-void ChannelFilter::_listRules(char *reply, uint8_t page, bool is_remote) const {
-  // Count in-use rules and collect their indexes
+#define FILTER_REPLY_BUDGET     128
+#define FILTER_REPLY_HEADER_MAX 36 // slightly larger to fit profile info
+#define FILTER_REPLY_HINT_LEN   18
+
+void ChannelFilter::_listRules(char *reply, uint8_t page, bool is_remote, uint8_t profile_num) const {
+  const FilterProfileSerializer *prof = _getProfile(profile_num);
+  const FilterRule *rules = prof->getRules();
+
+  // Collect in-use rule indexes
   uint8_t indexes[MAX_FILTER_RULES];
   uint8_t total = 0;
   for (uint8_t i = 0; i < MAX_FILTER_RULES; i++) {
-    if (_rules[i].in_use) indexes[total++] = i;
+    if (rules[i].in_use) indexes[total++] = i;
   }
 
-  const char *mode_str = (_mode == FilterMode::DROP) ? "drop" : "allow";
+  uint8_t shown_profile = (profile_num == 0) ? _active + 1 : profile_num;
+  const char *mode_str = (prof->getMode() == FilterMode::DROP) ? "drop" : "allow";
+  const char *active_marker = (shown_profile == _active + 1) ? "*" : "";
 
   if (!is_remote) {
-    Serial.printf("mode:%s rules:%d/%d\n", mode_str, total, MAX_FILTER_RULES);
-    if (total > 0) {
-      for (uint8_t i = 0; i < total; i++) {
-        char line_buf[80];
-        formatRuleLine(_rules[indexes[i]], indexes[i], line_buf, sizeof(line_buf));
-        Serial.printf("%s", line_buf);
-      }
+    // Local Serial — dump everything at once
+    Serial.printf("profile:%d%s mode:%s rules:%d/%d\n", shown_profile, active_marker, mode_str, total,
+                  MAX_FILTER_RULES);
+    for (uint8_t i = 0; i < total; i++) {
+      char line[80];
+      formatRuleLine(rules[indexes[i]], indexes[i], line, sizeof(line));
+      Serial.printf("%s", line);
     }
-    reply[0] = '\0';
     return;
-  } else {
-    // Pre-scan: determine page boundaries dynamically based on actual line lengths.
-    // Each page gets as many rules as fit within FILTER_REPLY_BUDGET minus header and hint.
-    uint8_t page_start[MAX_FILTER_RULES + 1]; // start index into indexes[] for each page
-    uint8_t num_pages = 0;
-    page_start[0] = 0;
+  }
 
-    {
-      uint8_t i = 0;
-      while (i < total) {
-        // Available budget for rule lines on this page
-        int budget = FILTER_REPLY_BUDGET - FILTER_REPLY_HEADER_MAX - FILTER_REPLY_HINT_LEN;
-        uint8_t page_end = i;
-
-        while (page_end < total) {
-          char line_buf[80];
-          int line_len = formatRuleLine(_rules[indexes[page_end]], indexes[page_end],
-                                        line_buf, sizeof(line_buf));
-          if (budget - line_len < 0) break; // doesn't fit
-          budget -= line_len;
-          page_end++;
-        }
-
-        // Safety: always advance at least one rule to avoid infinite loop
-        if (page_end == i) page_end = i + 1;
-
-        num_pages++;
-        i = page_end;
-        page_start[num_pages] = i;
+  // Remote — paginate within FILTER_REPLY_BUDGET
+  uint8_t page_start[MAX_FILTER_RULES + 1];
+  uint8_t num_pages = 0;
+  page_start[0] = 0;
+  {
+    uint8_t i = 0;
+    while (i < total) {
+      int budget = FILTER_REPLY_BUDGET - FILTER_REPLY_HEADER_MAX - FILTER_REPLY_HINT_LEN;
+      uint8_t page_end = i;
+      while (page_end < total) {
+        char line_buf[80];
+        int line_len =
+            formatRuleLine(rules[indexes[page_end]], indexes[page_end], line_buf, sizeof(line_buf));
+        if (budget - line_len < 0) break;
+        budget -= line_len;
+        page_end++;
       }
+      if (page_end == i) page_end = i + 1;
+      num_pages++;
+      i = page_end;
+      page_start[num_pages] = i;
     }
+  }
+  if (total == 0) num_pages = 1;
 
-    if (total == 0) num_pages = 1;
+  if (page >= num_pages) {
+    snprintf(reply, 80, "Err - page %d out of range (0-%d)", page, num_pages - 1);
+    return;
+  }
 
-    if (page >= num_pages) {
-      snprintf(reply, 80, "Err - page %d out of range (0-%d)", page, num_pages - 1);
-      return;
-    }
+  int pos;
+  if (num_pages > 1) {
+    pos = snprintf(reply, FILTER_REPLY_BUDGET, "p%d%s mode:%s %d/%d pg%d/%d\n", shown_profile, active_marker,
+                   mode_str, total, MAX_FILTER_RULES, page + 1, num_pages);
+  } else {
+    pos = snprintf(reply, FILTER_REPLY_BUDGET, "p%d%s mode:%s rules:%d/%d\n", shown_profile, active_marker,
+                   mode_str, total, MAX_FILTER_RULES);
+  }
 
-    // Write header
-    int pos;
-    if (num_pages > 1) {
-      pos = snprintf(reply, FILTER_REPLY_BUDGET, "mode:%s rules:%d/%d p%d/%d\n",
-                     mode_str, total, MAX_FILTER_RULES, page + 1, num_pages);
-    } else {
-      pos = snprintf(reply, FILTER_REPLY_BUDGET, "mode:%s rules:%d/%d\n",
-                     mode_str, total, MAX_FILTER_RULES);
-    }
+  if (total == 0) {
+    snprintf(reply + pos, FILTER_REPLY_BUDGET - pos, "(no rules)");
+    return;
+  }
 
-    if (total == 0) {
-      snprintf(reply + pos, FILTER_REPLY_BUDGET - pos, "(no rules)");
-      return;
-    }
+  uint8_t start = page_start[page];
+  uint8_t end = page_start[page + 1];
+  for (uint8_t i = start; i < end; i++) {
+    char line_buf[80];
+    formatRuleLine(rules[indexes[i]], indexes[i], line_buf, sizeof(line_buf));
+    pos += snprintf(reply + pos, FILTER_REPLY_BUDGET - pos, "%s", line_buf);
+  }
 
-    // Write rule lines for this page
-    uint8_t start = page_start[page];
-    uint8_t end = page_start[page + 1];
-
-    for (uint8_t i = start; i < end; i++) {
-      char line_buf[80];
-      formatRuleLine(_rules[indexes[i]], indexes[i], line_buf, sizeof(line_buf));
-      pos += snprintf(reply + pos, FILTER_REPLY_BUDGET - pos, "%s", line_buf);
-    }
-
-    // Hint if more pages follow
-    if (page + 1 < num_pages) {
+  if (page + 1 < num_pages) {
+    uint8_t pnum = (profile_num == 0) ? 0 : profile_num;
+    if (pnum == 0) {
       snprintf(reply + pos, FILTER_REPLY_BUDGET - pos, "-> filter list %d", page + 1);
+    } else {
+      snprintf(reply + pos, FILTER_REPLY_BUDGET - pos, "-> filter %d list %d", pnum, page + 1);
     }
   }
 }
@@ -519,7 +473,7 @@ void ChannelFilter::_listRules(char *reply, uint8_t page, bool is_remote) const 
 // ---------------------------------------------------------------------------
 
 void ChannelFilter::handleCommand(const char *args, char *reply, FILESYSTEM &fs, ClientInfo *sender) {
-  bool is_remote = (sender != NULL); // Check if commands are from Serial (ClientInfo = NULL).
+  bool is_remote = (sender != nullptr);
   FilterParseResult res = parseFilterCommand(args);
 
   if (res.error != FilterParseError::OK) {
@@ -527,69 +481,91 @@ void ChannelFilter::handleCommand(const char *args, char *reply, FILESYSTEM &fs,
     return;
   }
 
+  // SET_PROFILE and GET_PROFILE don't target a specific profile's rules
+  if (res.command == FilterCommand::SET_PROFILE) {
+    if (res.target_profile < 1 || res.target_profile > MAX_FILTER_PROFILES) {
+      snprintf(reply, 80, "Err - invalid profile");
+      return;
+    }
+    _active = res.target_profile - 1;
+    save(fs);
+    snprintf(reply, 80, "OK - active profile: %d", res.target_profile);
+    return;
+  }
+
+  if (res.command == FilterCommand::GET_PROFILE) {
+    snprintf(reply, 80, "active profile: %d", _active + 1);
+    return;
+  }
+
+  if (res.command == FilterCommand::LIST) {
+    _listRules(reply, res.rule_id, is_remote, res.target_profile);
+    return;
+  }
+
+  // All other commands operate on the target profile
+  FilterProfileSerializer *prof = _getProfile(res.target_profile);
+
   switch (res.command) {
   case FilterCommand::ADD: {
-    int slot = _firstFreeSlot();
+    int slot = prof->firstFreeSlot();
     if (slot < 0) {
       snprintf(reply, 80, "Err - rules full (max %d)", MAX_FILTER_RULES);
       return;
     }
-    _rules[slot] = res.rule;
+    prof->getRules()[slot] = res.rule;
     save(fs);
-    snprintf(reply, 80, "OK - rule %d added", slot);
+    snprintf(reply, 80, "OK - rule %d added (profile %d)", slot,
+             res.target_profile == 0 ? _active + 1 : res.target_profile);
     break;
   }
-
   case FilterCommand::DEL: {
     uint8_t id = res.rule_id;
-    if (!_rules[id].in_use) {
+    if (!prof->getRules()[id].in_use) {
       snprintf(reply, 80, "Err - rule %d not in use", id);
       return;
     }
-    memset(&_rules[id], 0, sizeof(FilterRule));
+    memset(&prof->getRules()[id], 0, sizeof(FilterRule));
     save(fs);
     snprintf(reply, 80, "OK - rule %d deleted", id);
     break;
   }
-
   case FilterCommand::DISABLE: {
     uint8_t id = res.rule_id;
-    if (!_rules[id].in_use) {
+    if (!prof->getRules()[id].in_use) {
       snprintf(reply, 80, "Err - rule %d not in use", id);
       return;
     }
-    _rules[id].enabled = false;
+    prof->getRules()[id].enabled = false;
     save(fs);
     snprintf(reply, 80, "OK - rule %d disabled", id);
     break;
   }
-
   case FilterCommand::ENABLE: {
     uint8_t id = res.rule_id;
-    if (!_rules[id].in_use) {
+    if (!prof->getRules()[id].in_use) {
       snprintf(reply, 80, "Err - rule %d not in use", id);
       return;
     }
-    _rules[id].enabled = true;
+    prof->getRules()[id].enabled = true;
     save(fs);
     snprintf(reply, 80, "OK - rule %d enabled", id);
     break;
   }
-
-  case FilterCommand::LIST:
-    _listRules(reply, res.rule_id, is_remote);
-    break;
-
   case FilterCommand::CLEAR:
-    memset(_rules, 0, sizeof(_rules));
+    prof->reset();
     save(fs);
-    snprintf(reply, 80, "OK - all rules cleared");
+    snprintf(reply, 80, "OK - profile %d cleared",
+             res.target_profile == 0 ? _active + 1 : res.target_profile);
     break;
-
   case FilterCommand::MODE:
-    _mode = res.mode;
+    prof->setMode(res.mode);
     save(fs);
-    snprintf(reply, 80, "OK - mode: %s", res.mode == FilterMode::DROP ? "drop" : "allow");
+    snprintf(reply, 80, "OK - profile %d mode: %s",
+             res.target_profile == 0 ? _active + 1 : res.target_profile,
+             res.mode == FilterMode::DROP ? "drop" : "allow");
+    break;
+  default:
     break;
   }
 }

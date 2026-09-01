@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 #define MAX_FILTER_RULES          8
+#define MAX_FILTER_PROFILES       2
 #define MAX_PATH_HASHES_PER_RULE  4
 #define MAX_PATH_HASH_SIZE        3   // 1, 2 or 3 bytes per hash
 #define MAX_CHANNEL_HASHES        4   // OR-list for channel field

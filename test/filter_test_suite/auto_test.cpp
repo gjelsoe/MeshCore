@@ -532,6 +532,101 @@ static void test_list_length() {
     }
 }
 
+static void test_profiles() {
+    MockFS fs;
+    char reply[160];
+
+    section("Parser — profile prefix");
+
+    auto r = parseFilterCommand("1 add drop payload eq grptxt");
+    CHECK("'1 add ...' -> target_profile == 1",  r.error == FilterParseError::OK && r.target_profile == 1);
+
+    r = parseFilterCommand("2 add drop route eq tflood");
+    CHECK("'2 add ...' -> target_profile == 2",  r.error == FilterParseError::OK && r.target_profile == 2);
+
+    r = parseFilterCommand("add drop payload eq grptxt");
+    CHECK("'add ...' -> target_profile == 0 (active)", r.error == FilterParseError::OK && r.target_profile == 0);
+
+    r = parseFilterCommand("set profile 1");
+    CHECK("'set profile 1' -> SET_PROFILE, profile=1",
+          r.error == FilterParseError::OK && r.command == FilterCommand::SET_PROFILE && r.target_profile == 1);
+
+    r = parseFilterCommand("set profile 2");
+    CHECK("'set profile 2' -> SET_PROFILE, profile=2",
+          r.error == FilterParseError::OK && r.command == FilterCommand::SET_PROFILE && r.target_profile == 2);
+
+    r = parseFilterCommand("set profile 3");
+    CHECK("'set profile 3' -> INVALID_PROFILE",  r.error == FilterParseError::INVALID_PROFILE);
+
+    r = parseFilterCommand("profile");
+    CHECK("'profile' -> GET_PROFILE",             r.error == FilterParseError::OK && r.command == FilterCommand::GET_PROFILE);
+
+    r = parseFilterCommand("1 list");
+    CHECK("'1 list' -> LIST, target_profile=1",   r.error == FilterParseError::OK && r.target_profile == 1);
+
+    section("Profiles — independent rule sets");
+
+    ChannelFilter f;
+
+    // Add to profile 1 (active by default)
+    addRule(f, "add drop payload eq grptxt", fs);
+
+    // Add to profile 2
+    f.handleCommand("2 add drop route eq tflood", reply, fs, nullptr);
+    f.handleCommand("2 enable 0", reply, fs, nullptr);
+
+    mesh::Packet grptxt = makePacket(ROUTE_TYPE_FLOOD,           PAYLOAD_TYPE_GRP_TXT);
+    mesh::Packet tflood = makePacket(ROUTE_TYPE_TRANSPORT_FLOOD, PAYLOAD_TYPE_TXT_MSG);
+    mesh::Packet norm   = makePacket(ROUTE_TYPE_FLOOD,           PAYLOAD_TYPE_TXT_MSG);
+
+    // Active = profile 1 — grptxt drops, tflood passes
+    CHECK("profile 1 active: grptxt -> DROP",    f.evaluate(&grptxt, -80));
+    CHECK("profile 1 active: tflood -> PASS",   !f.evaluate(&tflood, -80));
+
+    // Switch to profile 2 — tflood drops, grptxt passes
+    f.handleCommand("set profile 2", reply, fs, nullptr);
+    CHECK("profile 2 active: tflood -> DROP",    f.evaluate(&tflood, -80));
+    CHECK("profile 2 active: grptxt -> PASS",   !f.evaluate(&grptxt, -80));
+
+    // Switch back to profile 1
+    f.handleCommand("set profile 1", reply, fs, nullptr);
+    CHECK("back to profile 1: grptxt -> DROP",   f.evaluate(&grptxt, -80));
+
+    section("Profiles — mode per profile");
+
+    ChannelFilter fm;
+    fm.handleCommand("1 mode drop", reply, fs, nullptr);
+    fm.handleCommand("2 mode allow", reply, fs, nullptr);
+
+    // Profile 1: mode drop, no rules -> everything drops
+    CHECK("profile 1 mode drop, no rules -> norm drops",   fm.evaluate(&norm, -80));
+
+    // Switch to profile 2: mode allow, no rules -> everything passes
+    fm.handleCommand("set profile 2", reply, fs, nullptr);
+    CHECK("profile 2 mode allow, no rules -> norm passes", !fm.evaluate(&norm, -80));
+
+    section("Profiles — persistence round-trip");
+
+    MockFS fs2;
+    ChannelFilter fs_f;
+    addRule(fs_f, "add drop payload eq grptxt", fs2);          // profile 1
+    fs_f.handleCommand("2 add drop route eq tflood", reply, fs2, nullptr);
+    fs_f.handleCommand("2 enable 0", reply, fs2, nullptr);
+    fs_f.handleCommand("set profile 2", reply, fs2, nullptr);  // switch active to 2
+    fs_f.save(fs2);
+
+    ChannelFilter fs_f2;
+    fs_f2.load(fs2);
+
+    // After reload: active = profile 2
+    CHECK("reload: active profile 2 -> tflood drops",   fs_f2.evaluate(&tflood, -80));
+    CHECK("reload: active profile 2 -> grptxt passes", !fs_f2.evaluate(&grptxt, -80));
+
+    // Switch to profile 1 and verify
+    fs_f2.handleCommand("set profile 1", reply, fs2, nullptr);
+    CHECK("reload: switch to profile 1 -> grptxt drops", fs_f2.evaluate(&grptxt, -80));
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -545,6 +640,7 @@ int main() {
     test_evaluate();
     test_persistence();
     test_and_condition();
+    test_profiles();
     test_list_length();
 
     printf("\n═══════════════════════════════════════\n");

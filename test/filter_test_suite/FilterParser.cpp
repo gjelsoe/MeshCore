@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <stdio.h>
 
 // ---------------------------------------------------------------------------
 // Internal tokenizer
@@ -340,14 +341,15 @@ static FilterParseResult parseAddCommand(Tokenizer& tz) {
 }
 
 // ---------------------------------------------------------------------------
-// Public entry point
+// Internal helper — parse a sub-command given a tokenizer already positioned
+// past any profile prefix. Sets result.target_profile before calling.
 // ---------------------------------------------------------------------------
 
-FilterParseResult parseFilterCommand(const char* input) {
+static FilterParseResult parseSubCommand(Tokenizer& tz, uint8_t target_profile) {
     FilterParseResult result;
-    memset(&result, 0, sizeof(result));  // zero all fields including rule — safe default for all error paths
+    memset(&result, 0, sizeof(result));
+    result.target_profile = target_profile;
 
-    Tokenizer tz = { input };
     char tok[MAX_TOKEN_LEN + 1];
 
     if (!nextToken(tz, tok)) {
@@ -355,16 +357,16 @@ FilterParseResult parseFilterCommand(const char* input) {
         return result;
     }
 
-    // --- route to sub-command ---
     if (strcmp(tok, "add") == 0) {
-        return parseAddCommand(tz);
+        result = parseAddCommand(tz);
+        result.target_profile = target_profile;
+        return result;
     }
 
     if (strcmp(tok, "list") == 0) {
         result.error   = FilterParseError::OK;
         result.command = FilterCommand::LIST;
         result.rule_id = 0;  // default page 0
-        // Optional page number: "filter list 1"
         if (peekToken(tz, tok)) {
             nextToken(tz, tok);
             char* end;
@@ -423,6 +425,60 @@ FilterParseResult parseFilterCommand(const char* input) {
 }
 
 // ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+FilterParseResult parseFilterCommand(const char* input) {
+    FilterParseResult result;
+    memset(&result, 0, sizeof(result));  // zero all fields — safe default for all error paths
+
+    Tokenizer tz = { input };
+    char tok[MAX_TOKEN_LEN + 1];
+
+    if (!nextToken(tz, tok)) {
+        result.error = FilterParseError::MISSING_TOKEN;
+        return result;
+    }
+
+    // --- profile prefix: "filter 1 ..." or "filter 2 ..." ---
+    if (strcmp(tok, "1") == 0 || strcmp(tok, "2") == 0) {
+        uint8_t profile = (uint8_t)(tok[0] - '0');
+        return parseSubCommand(tz, profile);
+    }
+
+    // --- "filter set profile <num>" ---
+    if (strcmp(tok, "set") == 0) {
+        if (!nextToken(tz, tok)) { result.error = FilterParseError::MISSING_TOKEN; return result; }
+        if (strcmp(tok, "profile") != 0) { result.error = FilterParseError::UNKNOWN_COMMAND; return result; }
+        if (!nextToken(tz, tok)) { result.error = FilterParseError::MISSING_TOKEN; return result; }
+        char* end;
+        long p = strtol(tok, &end, 10);
+        if (*end != '\0' || p < 1 || p > MAX_FILTER_PROFILES) {
+            result.error = FilterParseError::INVALID_PROFILE;
+            return result;
+        }
+        result.error          = FilterParseError::OK;
+        result.command        = FilterCommand::SET_PROFILE;
+        result.target_profile = (uint8_t)p;
+        return result;
+    }
+
+    // --- "filter profile" — show active profile ---
+    if (strcmp(tok, "profile") == 0) {
+        result.error   = FilterParseError::OK;
+        result.command = FilterCommand::GET_PROFILE;
+        return result;
+    }
+
+    // Reconstruct input with tok prepended so parseSubCommand sees the full command.
+    // 256 bytes is a safe upper bound for any CLI command string.
+    char reconstructed[MAX_TOKEN_LEN + 256];
+    snprintf(reconstructed, sizeof(reconstructed), "%s %s", tok, tz.pos);
+    Tokenizer tz2 = { reconstructed };
+    return parseSubCommand(tz2, 0);
+}
+
+// ---------------------------------------------------------------------------
 // Error string helper
 // ---------------------------------------------------------------------------
 
@@ -444,6 +500,7 @@ const char* filterParseErrorStr(FilterParseError err) {
         case FilterParseError::AND_DUPLICATE_FIELD:     return "Err - AND condition cannot use same field as primary";
         case FilterParseError::AND_CHANNEL_NOT_ALLOWED: return "Err - channel field not supported as AND condition";
         case FilterParseError::TOO_MANY_CHANNELS:       return "Err - too many channel hashes (max 4)";
+        case FilterParseError::INVALID_PROFILE:         return "Err - invalid profile (use: 1 or 2)";
         default:                                  return "Err - unknown error";
     }
 }
