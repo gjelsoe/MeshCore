@@ -1186,6 +1186,22 @@ void CommonCLI::handleRegionCmd(char* command, char* reply) {
     } else {
       strcpy(reply, "Err - unknown region");
     }
+  } else if (n >= 3 && strcmp(parts[1], "hide") == 0) {
+    auto region = _region_map->findByNamePrefix(parts[2]);
+    if (region) {
+      region->flags |= REGION_HIDDEN;
+      strcpy(reply, "OK");
+    } else {
+      strcpy(reply, "Err - unknown region");
+    }
+  } else if (n >= 3 && strcmp(parts[1], "unhide") == 0) {
+    auto region = _region_map->findByNamePrefix(parts[2]);
+    if (region) {
+      region->flags &= ~REGION_HIDDEN;
+      strcpy(reply, "OK");
+    } else {
+      strcpy(reply, "Err - unknown region");
+    }
   } else if (n >= 3 && strcmp(parts[1], "get") == 0) {
     auto region = _region_map->findByNamePrefix(parts[2]);
     if (region) {
