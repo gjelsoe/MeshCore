@@ -1,6 +1,6 @@
 #pragma once
 
-#define WITH_PACKET_FILTER
+#define WITH_CHANNEL_FILTER
 
 // NOTE: This header relies on FILESYSTEM and ConfigSerializer being defined before inclusion.
 // MyMesh.h includes the platform-specific filesystem headers before including this file.
