@@ -35,6 +35,7 @@ public:
   int read() override  { return _pos < _len ? (uint8_t)_data[_pos++] : -1; }
   int peek() override  { return _pos < _len ? (uint8_t)_data[_pos]   : -1; }
   size_t write(uint8_t) override { return 0; }  // unused, read-only
+  void flush() override { }  // unused, read-only
 };
 
 static char command[160];
