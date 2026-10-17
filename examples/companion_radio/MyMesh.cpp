@@ -286,7 +286,8 @@ static void applyCompanionRxPowerSaving(uint8_t sf, float bw) {
     control->setRxPowerSaving(false, RX_POWERSAVING_DEFAULT_RX_US,
                               RX_POWERSAVING_DEFAULT_SLEEP_US);
   }
-  MESH_DEBUG_PRINTLN("RX Power Saving: companion level=5,preamble=16,rx=%lu,sleep=%lu,%s",
+  MESH_DEBUG_PRINTLN("RX Power Saving: companion level=%u,preamble=%u,rx=%lu,sleep=%lu,%s",
+                     RX_POWERSAVING_BALANCED_LEVEL, RX_POWERSAVING_PROFILE_PREAMBLE,
                      (unsigned long)rx_us, (unsigned long)sleep_us,
                      ok ? "accepted" : "unavailable - continuous RX");
 #else
@@ -915,7 +916,15 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
   _prefs.tx_power_dbm = LORA_TX_POWER;
   _prefs.gps_enabled = 0;       // GPS disabled by default
   _prefs.gps_interval = 0;      // No automatic GPS updates by default
+
+#if defined(RADIO_FEM_RXGAIN) && (RADIO_FEM_RXGAIN == 0)
+  _prefs.radio_fem_rxgain = 0;
+#elif defined(RADIO_FEM_RXGAIN) && (RADIO_FEM_RXGAIN == 1)
   _prefs.radio_fem_rxgain = 1;
+#else
+  _prefs.radio_fem_rxgain = 0;  // PowerSaving and better signal
+#endif
+
   _prefs.radio_fem_txgain = 0;
   //_prefs.rx_delay_base = 10.0f;  enable once new algo fixed
   _prefs.setRepeatEn(false);
@@ -926,6 +935,9 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
   _prefs.rx_boosted_gain = 1; // enabled by default
 #endif
 #endif
+
+  // PowerSaving defaults
+  _prefs.powersaving_enabled = 1;
 }
 
 void MyMesh::begin(bool has_display) {
@@ -1689,6 +1701,9 @@ void MyMesh::handleCmdFrame(size_t len) {
     }
 
     // query other sensors -- target specific
+    if (sensors.getLocationProvider() != NULL && sensors.getLocationProvider()->isPowerSavingEnabled()) {
+      sensors.getLocationProvider()->syncTime(); // Request for GPS sync if GPS is in PowerSaving
+    }
     sensors.querySensors(0xFF, telemetry);
 
     int i = 0;

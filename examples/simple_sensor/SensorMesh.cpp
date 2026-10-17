@@ -1,4 +1,28 @@
 #include "SensorMesh.h"
+#include "helpers/radiolib/RXPowerSaving.h"
+
+static RxPowerSavingControl* getRxPowerSavingControl() {
+#ifdef WRAPPER_CLASS
+  return &radio_driver;
+#else
+  return nullptr;
+#endif
+}
+
+static void applyRxPowerSavingConfig(NodePrefs& prefs, uint8_t sf, float bw) {
+  RxPowerSavingControl* control = getRxPowerSavingControl();
+  normalizeRxPowerSavingConfig(&prefs.rxps, sf, bw, rxPowerSavingCaptureCost(control),
+                               rxPowerSavingTransition(control));
+  bool ok = control != nullptr
+      ? control->setRxPowerSaving(
+            prefs.rxps.enabled != 0, prefs.rxps.rx_us, prefs.rxps.sleep_us)
+      : prefs.rxps.enabled == 0;
+  MESH_DEBUG_PRINTLN("RX Power Saving: desired=%s, rx=%lu, sleep=%lu, %s",
+                     prefs.rxps.enabled ? "on" : "off",
+                     (unsigned long)prefs.rxps.rx_us,
+                     (unsigned long)prefs.rxps.sleep_us,
+                     ok ? "accepted" : "unsupported");
+}
 
 /* ------------------------------ Config -------------------------------- */
 
@@ -42,6 +66,10 @@
 
 #ifndef SENSOR_READ_INTERVAL_SECS
   #define SENSOR_READ_INTERVAL_SECS  60
+#endif
+
+#ifndef GPS_READ_INTERVAL_SECS
+  #define GPS_READ_INTERVAL_SECS 60
 #endif
 
 /* ------------------------------ Code -------------------------------- */
@@ -179,8 +207,10 @@ uint8_t SensorMesh::handleRequest(uint8_t perms, uint32_t sender_timestamp, uint
     telemetry.reset();
     telemetry.addVoltage(TELEM_CHANNEL_SELF, (float)board.getBattMilliVolts() / 1000.0f);
     // query other sensors -- target specific
-    if (sensors.getLocationProvider() != NULL && sensors.getLocationProvider()->isPowerSavingEnabled()) {
-      sensors.getLocationProvider()->syncTime(); // Request for GPS sync if GPS is in PowerSaving
+    if (sensors.getLocationProvider() != NULL &&
+        sensors.getLocationProvider()->isPowerSavingEnabled() &&
+        getRTCClock()->getCurrentTime() - sensors.getLocationProvider()->getLastValidTimeSync() >= GPS_READ_INTERVAL_SECS) {
+      sensors.getLocationProvider()->syncTime(); // Request for GPS sync if GPS is in PowerSaving if later than read interval
     }
     sensors.querySensors(0xFF & perm_mask, telemetry);  // allow all telemetry permissions for admin or guest
     // TODO: let requester know permissions they have:  telemetry.addPresence(TELEM_CHANNEL_SELF, perms);
@@ -709,7 +739,7 @@ void SensorMesh::onAckRecv(mesh::Packet* packet, uint32_t ack_crc) {
 SensorMesh::SensorMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::MillisecondClock& ms, mesh::RNG& rng, mesh::RTCClock& rtc, mesh::MeshTables& tables)
      : mesh::Mesh(radio, ms, rng, rtc, *new StaticPoolPacketManager(32), tables),
       region_map(key_store),
-      _cli(board, rtc, sensors, region_map, acl, &_prefs, this),
+      _cli(board, rtc, sensors, region_map, acl, &_prefs, this, getRxPowerSavingControl()),
       telemetry(MAX_PACKET_PAYLOAD - 4)
 {
   next_local_advert = next_flood_advert = 0;
@@ -743,10 +773,18 @@ SensorMesh::SensorMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::Millise
   _prefs.gps_enabled = 0;
   _prefs.gps_interval = 0;
   _prefs.advert_loc_policy = ADVERT_LOC_PREFS;
-  _prefs.radio_fem_rxgain = 1;
+  _prefs.radio_fem_rxgain = 0; // PowerSaving and better signal
   _prefs.radio_fem_txgain = 0;
 
   memset(default_scope.key, 0, sizeof(default_scope.key));
+
+  // PowerSaving defaults
+  _prefs.powersaving_enabled = 1;
+
+  // RXPS defaults - Balanced profile
+  _prefs.rxps.enabled = 1;
+  _prefs.rxps.level = 6;
+  _prefs.rxps.preamble = 16;
 }
 
 void SensorMesh::begin(FILESYSTEM* fs) {
@@ -782,6 +820,7 @@ void SensorMesh::begin(FILESYSTEM* fs) {
   radio_driver.setTxPower(_prefs.tx_power_dbm);
   board.setLoRaFemLnaEnabled(_prefs.radio_fem_rxgain);
   board.setLoRaFemPaGainEnabled(_prefs.radio_fem_txgain);
+  applyRxPowerSavingConfig(_prefs, _prefs.sf, _prefs.bw);
 
   updateAdvertTimer();
   updateFloodAdvertTimer();
@@ -925,12 +964,14 @@ void SensorMesh::loop() {
   if (set_radio_at && millisHasNowPassed(set_radio_at)) {   // apply pending (temporary) radio params
     set_radio_at = 0;  // clear timer
     radio_driver.setParams(pending_freq, pending_bw, pending_sf, pending_cr);
+    applyRxPowerSavingConfig(_prefs, pending_sf, pending_bw);
     MESH_DEBUG_PRINTLN("Temp radio params");
   }
 
   if (revert_radio_at && millisHasNowPassed(revert_radio_at)) {   // revert radio params to orig
     revert_radio_at = 0;  // clear timer
     radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
+    applyRxPowerSavingConfig(_prefs, _prefs.sf, _prefs.bw);
     MESH_DEBUG_PRINTLN("Radio params restored");
   }
 
@@ -991,5 +1032,7 @@ void SensorMesh::loop() {
 
 // To check if there is pending work
 bool SensorMesh::hasPendingWork() const {
+  const RxPowerSavingControl* control = getRxPowerSavingControl();
+  if (control != nullptr && control->isRxPowerSavingCalibrationActive()) return true;
   return _mgr->getOutboundTotal() > 0;
 }
