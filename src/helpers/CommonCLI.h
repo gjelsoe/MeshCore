@@ -76,7 +76,6 @@ public:
   uint8_t loop_detect = 0;
   uint8_t cad_enabled = 0;      // hardware Channel Activity Detection before TX (boolean)
   uint8_t extra_sf[4];
-  RxPowerSavingConfig rxps;
 
 private:
   class RadioPrefs : public CommonRadioPrefs {
