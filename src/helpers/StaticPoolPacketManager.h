@@ -38,4 +38,7 @@ public:
   mesh::Packet* removeOutboundByIdx(int i) override;
   void queueInbound(mesh::Packet* packet, uint32_t scheduled_for) override;
   mesh::Packet* getNextInbound(uint32_t now) override;
+
+  // PowerSaving variant
+  int getInboundTotal() const override { return rx_queue.count(); }
 };

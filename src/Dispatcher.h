@@ -98,6 +98,9 @@ public:
   virtual Packet* removeOutboundByIdx(int i) = 0;
   virtual void queueInbound(Packet* packet, uint32_t scheduled_for) = 0;
   virtual Packet* getNextInbound(uint32_t now) = 0;
+
+  // PowerSaving variant
+  virtual int getInboundTotal() const { return 0; }  // delayed (rxdelay) packets not yet processed
 };
 
 typedef uint32_t  DispatcherAction;
@@ -173,6 +176,8 @@ protected:
   virtual unsigned long getDutyCycleWindowMs() const { return 3600000; }
 
 public:
+  // PowerSaving variant
+  bool isTransmitting() const { return outbound != nullptr; }
   void begin();
   void loop();
 

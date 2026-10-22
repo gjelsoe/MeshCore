@@ -5,6 +5,7 @@
 #ifdef ESP32_PLATFORM
 #include "esp_pm.h"
 #include "esp_bt.h"
+#include "PowerSaving.h"
 #endif
 
 // Believe it or not, this std C function is busted on some platforms!
@@ -294,35 +295,7 @@ void setup() {
   board.onBootComplete();
 
 #if defined(ESP32_PLATFORM)
-  #if defined(BLE_PIN_CODE) && !CONFIG_IDF_TARGET_ESP32C6
-    // Enable BLE sleep
-    esp_bt_sleep_enable();
-  #endif
-
-#if CONFIG_IDF_TARGET_ESP32C3
-  esp_pm_config_esp32c3_t pm_config;
-#elif CONFIG_IDF_TARGET_ESP32S3
-  esp_pm_config_esp32s3_t pm_config;
-#elif CONFIG_IDF_TARGET_ESP32
-  esp_pm_config_esp32_t pm_config;
-#elif CONFIG_IDF_TARGET_ESP32C6
-  esp_pm_config_t pm_config;
-#endif
-
-  // Configure Power Management
-#if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
-  // Disable automatic light sleep for USB CDC Serial
-  pm_config = { .max_freq_mhz = 80, .min_freq_mhz = 40, .light_sleep_enable = false };
-#else
-  pm_config = { .max_freq_mhz = 80, .min_freq_mhz = 40, .light_sleep_enable = true };
-#endif
-
-  esp_err_t errPM = esp_pm_configure(&pm_config);
-  if (errPM == ESP_OK) {
-    Serial.println("Power Management configured successfully");
-  } else {
-    Serial.printf("Power Management failed to configure: %d\r\n", errPM);
-  }
+  applyCompanionPowerSaving(the_mesh.getNodePrefs()->powersaving_enabled);
 #endif
 }
 
@@ -339,19 +312,27 @@ void loop() {
   external_watchdog.loop();
 #endif
 
-  if (!the_mesh.hasPendingWork()) {
+  if (the_mesh.getNodePrefs()->powersaving_enabled && !the_mesh.hasPendingWork()) {
 #if defined(NRF52_PLATFORM)
     board.sleep(0); // nrf ignores seconds param, sleeps whenever possible
 #elif defined(ESP32_PLATFORM)
   #if defined(BLE_PIN_CODE)
-    if (!bluetooth_interface.isReadBusy() && !bluetooth_interface.isWriteBusy()) { // BLE is not busy
-      vTaskDelay(pdMS_TO_TICKS(10)); // attempt to sleep
-    }
+      if (!bluetooth_interface.isReadBusy() && !bluetooth_interface.isWriteBusy()) { // BLE is not busy
+        vTaskDelay(pdMS_TO_TICKS(10));                                               // attempt to sleep
+      }
   #elif defined(ENABLE_USB_INTERFACE)
-    vTaskDelay(pdMS_TO_TICKS(10)); // attempt to sleep
+      vTaskDelay(pdMS_TO_TICKS(10)); // attempt to sleep
   #endif
 #endif
   }
+
+#if defined(ESP32_PLATFORM)
+  static uint8_t applied_powersaving = the_mesh.getNodePrefs()->powersaving_enabled;
+  if (the_mesh.getNodePrefs()->powersaving_enabled != applied_powersaving) { // changed via CLI
+    applied_powersaving = the_mesh.getNodePrefs()->powersaving_enabled;
+    applyCompanionPowerSaving(applied_powersaving);
+  }
+#endif
 
 #ifdef ENABLE_WIFI_INTERFACE
   if (wifi_enabled) {

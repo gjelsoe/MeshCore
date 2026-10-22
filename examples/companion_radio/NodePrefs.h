@@ -37,6 +37,10 @@ public:
   uint32_t gps_interval = 0;     // GPS read interval in seconds
   uint8_t autoadd_config = 0;    // bitmask for auto-add contacts config
   uint8_t rx_boosted_gain = 0; // SX126x RX boosted gain mode (0=power saving, 1=boosted)
+
+  // PowerSaving variant
+  RxPowerSavingConfig rxps;
+
   uint8_t radio_fem_rxgain = 0; // external LoRa FEM RX gain (LNA)
   uint8_t radio_fem_txgain = 0; // external LoRa FEM TX gain (low by default)
   uint8_t _client_repeat = 0;  // DEPRECATED -> use repeat.disable_fwd
@@ -48,6 +52,10 @@ public:
   char default_scope_name[31];
   uint8_t default_scope_key[16];
   int8_t tz_offset = 0;
+
+  // PowerSaving variant
+  uint8_t powersaving_enabled = 0; // boolean
+
 #ifdef ENABLE_WIFI_INTERFACE
   #ifndef WIFI_SSID
     #define WIFI_SSID ""
@@ -81,9 +89,18 @@ private:
       def("agc_int", _parent->agc_reset_interval);
       def("hash_mode", _parent->path_hash_mode);
       def("multi_ack", _parent->multi_acks);
+      // PowerSaving variant
+      def("rxps_en", _parent->rxps.enabled);
+      def("rxps_rx_us", _parent->rxps.rx_us);
+      def("rxps_sleep_us", _parent->rxps.sleep_us);
+      def("rxps_level", _parent->rxps.level);
+      def("rxps_preamble", _parent->rxps.preamble);
     }
   public:
     RadioPrefs(NodePrefs* parent) : _parent(parent) { }
+
+    // PowerSaving variant
+    RxPowerSavingConfig* getRxPowerSavingConfig() override { return &_parent->rxps; }
 
     // CommonRadioPrefs interface
     float getFreq() const override { return _parent->freq; }
@@ -172,6 +189,18 @@ private:
   };
   CompanionPrefs companion;
 
+  // PowerSaving variant
+  class PowerPrefs : public ConfigSerializer {  // same keys as CommonCLI
+    NodePrefs* _parent;
+  protected:
+    void structure() override {
+      def("pwr_sav_en", _parent->powersaving_enabled);
+    }
+  public:
+    PowerPrefs(NodePrefs* parent) : _parent(parent) { }
+  };
+  PowerPrefs power;
+
   DynamicConfigSerializer custom;
 
 #ifdef ENABLE_WIFI_INTERFACE
@@ -200,13 +229,17 @@ protected:
     def("gps", gps);
     def("repeat", repeat);
     def("comp", companion);
+
+    // PowerSaving variant
+    def("power", power);
+
     def("custom", custom);
 #ifdef ENABLE_WIFI_INTERFACE
     def("wifi", wifi);
 #endif
   }
 public:
-  NodePrefs() : radio(this), gps(this), companion(this), custom(&radio)
+  NodePrefs() : radio(this), gps(this), companion(this), power(this), custom(&radio)
 #ifdef ENABLE_WIFI_INTERFACE
     , wifi(this)
 #endif
@@ -220,6 +253,9 @@ public:
   void setRepeatEn(bool en) { repeat.disable_fwd = en ? 0 : 1; }
 
   CommonRadioPrefs* getRadioPrefs() { return &radio; }
+  // PowerSaving variant
+  const CommonRadioPrefs* getRadioPrefs() const { return &radio; }
+
   KeyValueStore* getCustom() { return &custom; }
 
   bool isDirty() const override { return ConfigSerializer::isDirty() || radio.isDirty() || custom.isDirty(); }
