@@ -565,6 +565,12 @@ mesh::DispatcherAction MyMesh::onRecvPacket(mesh::Packet* pkt) {
   } else {
     recv_pkt_region = NULL;
   }
+
+  // Run packet through filter engine
+  if (_filter.evaluate(pkt, (int16_t)_radio->getLastRSSI())) {
+    MESH_DEBUG_PRINTLN("*** FILTER: packet dropped ***");
+    return ACTION_RELEASE;
+  }
   return Mesh::onRecvPacket(pkt);
 }
 
@@ -736,7 +742,7 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
       if (is_retry) {
         *reply = 0;
       } else {
-        handleCommand(sender_timestamp, command, reply);
+        handleCommand(sender_timestamp, client, command, reply);
       }
       int text_len = strlen(reply);
       if (text_len > 0) {
@@ -970,6 +976,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
   acl.load(_fs, self_id);
   // TODO: key_store.begin();
   region_map.load(_fs);
+  _filter.load(*_fs);
 
   // establish default-scope
   {
@@ -1217,7 +1224,7 @@ void MyMesh::clearStats() {
   ((SimpleMeshTables *)getTables())->resetStats();
 }
 
-void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply) {
+void MyMesh::handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char *command, char *reply) {
   if (region_load_active) {
     if (StrHelper::isBlank(command)) {  // empty/blank line, signal to terminate 'load' operation
       region_map = temp_map;  // copy over the temp instance as new current map
@@ -1303,7 +1310,10 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
       sendNodeDiscoverReq();
       strcpy(reply, "OK - Discover sent");
     }
-  } else{
+  } else if (strncmp(command, "filter", 6) == 0 && (command[6] == ' ' || command[6] == '\0')) {
+    const char* filter_args = (command[6] == ' ') ? command + 7 : "";
+    _filter.handleCommand(filter_args, reply, *_fs, sender);
+  } else {
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
 }
