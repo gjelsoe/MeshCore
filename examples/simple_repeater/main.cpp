@@ -168,7 +168,7 @@ void loop() {
       the_mesh.handleCommand(0, command, reply);
     }
 #else
-    the_mesh.handleCommand(0, command, reply);  // NOTE: there is no sender_timestamp via serial!
+    the_mesh.handleCommand(0, NULL, command, reply);  // NOTE: there is no sender_timestamp via serial!
 #endif
     if (reply[0]) {
       Serial.print("  -> "); Serial.println(reply);
