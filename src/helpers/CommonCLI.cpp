@@ -3,6 +3,7 @@
 #include "TxtDataHelpers.h"
 #include "AdvertDataHelpers.h"
 #include "TxtDataHelpers.h"
+#include "radiolib/RXPowerSavingCLI.h"
 #include <RTClib.h>
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
@@ -130,6 +131,7 @@ void CommonCLI::loadPrefsInt(FILESYSTEM* fs, const char* filename) {  // Legacy 
     _prefs->bridge_channel = constrain(_prefs->bridge_channel, 0, 14);
 
     _prefs->powersaving_enabled = constrain(_prefs->powersaving_enabled, 0, 1);
+    _prefs->reboot_interval = constrain(_prefs->reboot_interval, 0, 255);
 
     // PowerSaving variant
     _prefs->reboot_interval = constrain(_prefs->reboot_interval, 0, 255);
@@ -376,7 +378,7 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
       LocationProvider * l = _sensors->getLocationProvider();
       if (l != NULL) {
         l->syncTime();
-        strcpy(reply, "ok");
+        strcpy(reply, "scheduled");
       } else {
         strcpy(reply, "gps provider not found");
       }
@@ -483,10 +485,12 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
     } else if (memcmp(command, "powersaving on", 14) == 0) {
 #if defined(NRF52_PLATFORM)
       _prefs->powersaving_enabled = 1;
+      _sensors->powersaving_enabled = 1;
       savePrefs();
       strcpy(reply, "on - Immediate effect");
 #elif defined(ESP32) && !defined(WITH_BRIDGE)
       _prefs->powersaving_enabled = 1;
+      _sensors->powersaving_enabled = 1;
       savePrefs();
       // PowerSaving variant
       strcpy(reply, "on - After 5 minutes. Serial console will be off.");
@@ -497,6 +501,7 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
 #endif
     } else if (memcmp(command, "powersaving off", 15) == 0) {
       _prefs->powersaving_enabled = 0;
+      _sensors->powersaving_enabled = 0;
       savePrefs();
       strcpy(reply, "off");
     } else if (memcmp(command, "powersaving", 11) == 0) {
@@ -631,7 +636,7 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
       strcpy(reply, "OK");
     } else {
       strcpy(reply, "Error, max 64");
-    } 
+    }
   } else if (memcmp(config, "flood.max.advert ", 17) == 0) {
     uint8_t m = atoi(&config[17]);
     if (m <= 64) {
@@ -915,7 +920,7 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
     char* tmp = reply;
     for (int i = 0; i < 3 && _prefs->extra_sf[i] != 0; i++) {
       tmp += sprintf(tmp, "%s%d", (i == 0) ? "" : ",", _prefs->extra_sf[i]);
-    } 
+    }
     if (tmp == reply) {
       sprintf(reply, "No extra SF configured");
     }
@@ -1028,6 +1033,30 @@ void CommonCLI::handleRegionCmd(char* command, char* reply) {
     } else {
       strcpy(reply, "Err - unknown region");
     }
+  } else if (n >= 3 && strcmp(parts[1], "hide") == 0) {
+    if (strcmp(parts[2], "*") == 0) {
+      strcpy(reply, "Err - wildcard not allowed");
+    } else {
+      auto region = _region_map->findByNamePrefix(parts[2]);
+      if (region) {
+        region->flags |= REGION_HIDDEN;
+        strcpy(reply, "OK");
+      } else {
+        strcpy(reply, "Err - unknown region");
+      }
+    }
+  } else if (n >= 3 && strcmp(parts[1], "unhide") == 0) {
+    if (strcmp(parts[2], "*") == 0) {
+      strcpy(reply, "Err - wildcard not allowed");
+    } else {
+      auto region = _region_map->findByNamePrefix(parts[2]);
+      if (region) {
+        region->flags &= ~REGION_HIDDEN;
+        strcpy(reply, "OK");
+      } else {
+        strcpy(reply, "Err - unknown region");
+      }
+    }
   } else if (n >= 3 && strcmp(parts[1], "get") == 0) {
     auto region = _region_map->findByNamePrefix(parts[2]);
     if (region) {
@@ -1102,7 +1131,7 @@ void CommonCLI::handleRegionCmd(char* command, char* reply) {
   } else if (n >= 3 && strcmp(parts[1], "list") == 0) {
     uint8_t mask = 0;
     bool invert = false;
-    
+
     if (strcmp(parts[2], "allowed") == 0) {
       mask = REGION_DENY_FLOOD;
       invert = false;  // list regions that DON'T have DENY flag
@@ -1113,7 +1142,7 @@ void CommonCLI::handleRegionCmd(char* command, char* reply) {
       strcpy(reply, "Err - use 'allowed' or 'denied'");
       return;
     }
-    
+
     int len = _region_map->exportNamesTo(reply, 160, mask, invert);
     if (len == 0) {
       strcpy(reply, "-none-");

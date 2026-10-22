@@ -334,9 +334,11 @@ int RegionMap::exportNamesTo(char *dest, int max_len, uint8_t mask, bool invert)
     
     if (region_matches) {
       int len = strlen(skip_hash(region->name));
-      if ((dp - dest) + len + 2 < max_len) {   // only append if name will fit
+      bool hidden = (region->flags & REGION_HIDDEN);
+      if ((dp - dest) + len + (hidden ? 1 : 0) + 2 < max_len) {   // only append if name (+ marker) will fit
         memcpy(dp, skip_hash(region->name), len);
         dp += len;
+        if (hidden) *dp++ = '!';
         *dp++ = ',';
       }
     }

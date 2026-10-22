@@ -10,6 +10,7 @@
 
 #define REGION_DENY_FLOOD   0x01
 #define REGION_DENY_DIRECT  0x02   // reserved for future
+#define REGION_HIDDEN       0x04   // hide from Region Discovery listing
 
 struct RegionEntry {
   uint16_t id;
