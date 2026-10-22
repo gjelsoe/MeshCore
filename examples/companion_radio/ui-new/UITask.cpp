@@ -305,7 +305,8 @@ public:
       display.setColor(UIColor::title_bkg);
     }
     int y = 14;
-    int x = display.width() / 2 - 5 * (HomePage::Count-1);
+    // PowerSaving variant
+    int x = 5;  // Left-aligned dots
     for (uint8_t i = 0; i < HomePage::Count; i++, x += 10) {
       if (i == _page) {
         display.fillRect(x-1, y-1, 4, 4);

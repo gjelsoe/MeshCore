@@ -35,8 +35,10 @@ static void enableCompanionPowerSaving() {
 }
 
 static void disableCompanionPowerSaving() {
+#if defined(BLE_PIN_CODE) && !CONFIG_IDF_TARGET_ESP32C6
   // Disable BLE sleep
   esp_bt_sleep_disable();
+#endif
 
   // Configure Power Management
 #if CONFIG_IDF_TARGET_ESP32C3

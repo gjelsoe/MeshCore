@@ -28,7 +28,7 @@ static char ethernet_command[160];
 #endif
 
 // For power saving
-unsigned long POWERSAVING_FIRSTSLEEP_SECS = 120; // The first sleep (if enabled) from boot
+unsigned long POWERSAVING_FIRSTSLEEP_SECS = 300; // The first sleep (if enabled) from boot
 
 #if defined(PIN_USER_BTN) && defined(_SEEED_SENSECAP_SOLAR_H_)
 static unsigned long userBtnDownAt = 0;
