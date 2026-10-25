@@ -12,7 +12,6 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 - [Configuration](#configuration)
   - [Radio](#radio)
   - [System](#system)
-  - [Backup and Restore](#backup-and-restore)
   - [Routing](#routing)
   - [ACL](#acl)
   - [Region Management](#region-management-v110)
@@ -27,7 +26,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ## Operational
 
 ### Reboot the node
-**Usage:**
+**Usage:** 
 - `reboot`
 
 **Note:** No reply is sent.
@@ -52,7 +51,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ---
 
 ### Sync the clock with the remote device
-**Usage:**
+**Usage:** 
 - `clock sync`
 
 ---
@@ -64,7 +63,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ---
 
 ### Set the time to a specific timestamp
-**Usage:**
+**Usage:** 
 - `time <epoch_seconds>`
 
 **Parameters:**
@@ -73,7 +72,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ---
 
 ### Send a flood advert
-**Usage:**
+**Usage:** 
 - `advert`
 
 ---
@@ -103,7 +102,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ## Neighbors (Repeater Only)
 
 ### List nearby neighbors
-**Usage:**
+**Usage:** 
 - `neighbors`
 
 **Note:** The output of this command is limited to the 8 most recent adverts.
@@ -113,10 +112,10 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ---
 
 ### Remove a neighbor
-**Usage:**
+**Usage:** 
 - `neighbor.remove <pubkey_prefix>`
 
-**Parameters:**
+**Parameters:** 
 - `pubkey_prefix`: The public key of the node to remove from the neighbors list. This can be a short prefix or the full key. All neighbors matching the provided prefix will be removed.
 
 **Note:** You can remove all neighbors by sending a space character as the prefix. The space indicates an empty prefix, which matches all existing neighbors.
@@ -125,7 +124,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 
 ### Discover zero hop neighbors
 
-**Usage:**
+**Usage:** 
 - `discover.neighbors`
 
 ---
@@ -138,7 +137,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ---
 
 ### System Stats - Battery, Uptime, Queue Length and Debug Flags
-**Usage:**
+**Usage:** 
 - `stats-core`
 
 **Serial Only:** Yes
@@ -235,7 +234,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 ---
 
 #### Change the radio parameters for a set duration
-**Usage:**
+**Usage:** 
 - `tempradio <freq>,<bw>,<sf>,<cr>,<timeout_mins>`
 
 **Parameters:**
@@ -270,44 +269,11 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 - `set radio.rxgain <state>`
 
 **Parameters:**
-- `state`: `on`|`off`
+  - `state`: `on`|`off`
 
 **Default:** `on`
 
 **Temporary Note:** If you upgraded from an older version to 1.14.1 without erasing flash, this setting is `off` because of [#2118](https://github.com/meshcore-dev/MeshCore/issues/2118)
-
----
-
-#### View or change RX duty-cycle power saving
-**Usage:**
-- `get radio.rxps`
-- `set radio.rxps off`
-- `set radio.rxps on`
-- `set radio.rxps conservative`
-- `set radio.rxps balanced`
-- `set radio.rxps max`
-- `set radio.rxps max preamble <16|32>`
-- `set radio.rxps overdrive`
-- `set radio.rxps overdrive preamble <16|32>`
-- `set radio.rxps riskyWorkingMax`
-- `set radio.rxps riskyWorkingMax preamble <16|32>`
-- `set radio.rxps <1-10>`
-- `set radio.rxps level <1-10>`
-- `set radio.rxps level <1-10> preamble <16|32>`
-- `set radio.rxps <rx_us> <sleep_us>`
-
-**Parameters:**
-- `rx_us`, `sleep_us`: Receive and sleep durations in microseconds (`1000`-`30000000`).
-- `level`: `1`-`8`, expressed as **symbols of the sender's preamble the receiver catches** - how much of it lands inside an open RX window. Level `1` catches the most (15 symbols on the 16-symbol profile, 24 on the 32-symbol one) and costs the most power; level `8` catches 8 on both profiles and costs the least. Eight is the floor because that is what an LR11x0 needs to latch, so a level means the same geometry on either radio family. `9` (`overdrive`) and `10` (`riskyWorkingMax`) go below that floor and outside the datasheet timer condition; see below.
-- `preamble`: LoRa preamble length in symbols; `16` or `32`.
-- `state`: `on` or `off`.
-
-**Notes:**
-- `on` and `conservative` select level `3` (catches 13 symbols), `balanced` selects level `6` (catches 10), and `max` selects level `8` (catches 8); all three use a 16-symbol preamble.
-- Levels `1`-`8` satisfy the SX1261/2 duty-cycle timer condition; `max` is the top of that range. `overdrive` (level `9`) and `riskyWorkingMax` (level `10`) trade that guarantee for lower measured duty cycles; see the fuller entries below.
-- Like the other named profiles, `max`, `overdrive`, and `riskyWorkingMax` assume a 16-symbol sender preamble. At SF5-SF8 that is markedly less economical than the equivalent numeric level, which follows the SF onto the 32-symbol profile. Use the explicit `preamble 32` form to select the 32-symbol profile.
-- Level-based settings automatically recalculate their timings when the spreading factor or bandwidth changes. Custom `<rx_us> <sleep_us>` timings remain fixed.
-- The selected mode is applied immediately, persisted, and restored after reboot.
 
 ---
 
@@ -343,135 +309,6 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 - The setting is saved immediately, but on Station G3 the level is applied to the hardware at the start of the next transmit, so that the PA supply rail is never re-targeted while the PA is being driven. `get` reports the configured state, which may lead the hardware until the node next transmits.
 
 ---
-
-#### View or change RX power saving
-**Usage:**
-- `get radio.rxps`
-- `set radio.rxps off`
-- `set radio.rxps on`
-- `set radio.rxps conservative`
-- `set radio.rxps balanced`
-- `set radio.rxps max`
-- `set radio.rxps max preamble <symbols>`
-- `set radio.rxps overdrive`
-- `set radio.rxps overdrive preamble <symbols>`
-- `set radio.rxps riskyWorkingMax`
-- `set radio.rxps riskyWorkingMax preamble <symbols>`
-- `set radio.rxps <level>`
-- `set radio.rxps level <level>`
-- `set radio.rxps level <level> preamble <symbols>`
-- `set radio.rxps <rx_us> <sleep_us>`
-
-**Parameters:**
-- `level`: `1-10`. Levels `1`-`8` are the guarded scale and are expressed in **symbols of the sender's preamble caught**: 15, 14, 13, 12, 11, 10, 9, 8 on the 16-symbol profile and 24, 20, 16, 14, 12, 10, 9, 8 on the 32-symbol one. Level `8` is named `max`. `9` (`overdrive`) and `10` (`riskyWorkingMax`) drop below the 8-symbol floor and outside the datasheet timer condition; only `10` is expected to lose packets.
-- `symbols`: `16` or `32` preamble symbols.
-- `rx_us`: receive-window duration in microseconds, `1000-30000000`.
-- `sleep_us`: radio sleep duration in microseconds, `1000-30000000`.
-
-**Repeater default:** `off`
-
-**Profiles:**
-- `on` and `conservative`: level 3, catches 13 symbols, with a 16-symbol preamble.
-- `balanced`: level 6, catches 10 symbols, with a 16-symbol preamble.
-- `max`: level 8, catches the 8-symbol floor, the cheapest guarded setting that still works on both radio families, with a 16-symbol preamble.
-- `overdrive`: level 9, with a 16-symbol preamble. Outside the datasheet timer condition; see below.
-- `riskyWorkingMax`: level 10, with a 16-symbol preamble. The measured edge of what still works, and the only setting here that is expected to drop packets; see below.
-- Every named profile assumes a 16-symbol sender, which is the worst case a mixed network can present. At SF5-SF8 this is less economical than a numeric level, because a 32-symbol profile cannot catch a 16-symbol preamble. `max preamble 32`, `overdrive preamble 32`, and `riskyWorkingMax preamble 32` select the 32-symbol profile explicitly.
-- A numeric level, or `level <level>`, automatically uses 32 preamble symbols for SF5-SF8 and 16 for SF9-SF12.
-- `level <level> preamble <symbols>` explicitly fixes the preamble used in the calculation.
-- Explicit `rx_us sleep_us` values select manual timing (`level=0`).
-
-**How the timings are derived:**
-
-```text
-sleep  = (preamble - caught symbols) symbols
-listen = whatever the duty-cycle timer condition needs at that sleep
-```
-
-The capture cost - 6 symbols on SX126x, 8 on LR11x0, both measured on the bench -
-no longer enters this arithmetic; it is only a validation, since a level that
-catches fewer symbols than the radio needs to latch is rejected. That is why the
-same level produces the same periods on either family. The listen window is not
-a free parameter:
-it follows from the timer condition below. Three constraints are applied on top,
-all of them measured rather than assumed:
-
-- **Sleep floor.** The driver subtracts the sleep-to-RX transition (`tcxoDelay + 1000 us`) from the requested sleep before writing the register. Below that the arm call fails outright; just above it the SX1262 arms with no error and then detects no preambles at all. Levels whose own sleep falls under the floor are raised to it, and collapse onto the same timing as a result. If even the floor would break preamble capture - a short symbol leaves no room between the two - the level is rejected with `ERROR: RXPS does not fit this SF/BW with preamble <n>` rather than silently falling back to continuous RX.
-- **Timer condition.** Semtech requires `Tpreamble + Theader <= 2 * rxPeriod + sleepPeriod`, because the radio restarts its receive timer with that value when it detects a preamble. Guarded levels `1`-`8` satisfy it; `overdrive` and `riskyWorkingMax` deliberately do not. When it is broken, an SX1262 usually still receives normally, but isolated `rxPeriod` register values one tick wide lose most of the packets they have already latched, and nothing in the value predicts which. LR11x0 has always enforced an equivalent rule in its driver.
-- **Register granularity.** Both radio families program the duty cycle in 15.625 us ticks and truncate on the way in, so the reported periods are snapped to whole ticks and are the ones the hardware actually runs.
-
-**`overdrive` (level 9):**
-
-`overdrive` is the geometry that predates the timer condition being enforced: an
-8-symbol receive window with the sleep at the capture limit. It breaks the
-condition deliberately, in exchange for the lowest duty cycle available. The
-name is meant in the overclocking sense - measured to work, outside the vendor's
-stated envelope - rather than as a warning that it drops packets. It does not.
-
-| Assumed sender preamble | `overdrive` | Level 10 | Saving |
-|---|---|---|---|
-| 32 symbols | 23.5% | 27.5% (SF8) - 33.4% (SF6) | 4.0 - 9.9 pp |
-| 16 symbols | 44.4% | 49.7% (SF8) - 56.6% (SF6) | 5.3 - 12.2 pp |
-
-Both figures are dimensionless in symbols, so they hold at any spreading factor.
-The sleep floor and tick rounding still apply, and the receive window is moved
-one tick if it lands on a register value measured to misbehave. That list of
-values is not exhaustive, which is the whole of the residual risk: levels
-`1`-`8` are safe on any register value, `overdrive` is safe on every value that
-has been measured. It is a text-CLI setting only and is never selected by
-companion firmware.
-
-**`riskyWorkingMax` (level 10):**
-
-The end of the road: the profile extrapolated past `overdrive` until packet
-delivery started to fall, then stepped back to the last setting that still held. The
-sleep goes past the capture budget on purpose, so a preamble sometimes arrives
-while the radio is asleep - which is exactly why delivery falls. Measured at SF8
-with an LR1110 receiver witnessing every transmission on the same link:
-
-| Assumed sender preamble | Delivery | Sleep share | vs `overdrive` |
-|---|---|---|---|
-| 32 symbols | 196/200 (98.0%) | 79.3% | +2.8 pp sleep, -2.0 pp delivery |
-| 16 symbols | 197/200 (98.5%) | 56.4% | +0.9 pp sleep, -1.0 pp delivery |
-
-`overdrive` on the same link and in the same run read 200/200 and 199/200. So
-this level buys a little sleep and pays for it in packets, which is the whole
-trade and the reason the name is what it is. The command is case-sensitive and
-has no short form. On a mesh that relies on retries the cost may be acceptable;
-on a link that matters it is not.
-
-Level-based settings are recalculated after SF or bandwidth changes. Manual timings are not recalculated. Settings are persisted in `/prefs.json`. Companion firmware does not expose this text command and applies its fixed `balanced` profile (level 6, catches 10 symbols, preamble 16) at startup and after radio-parameter changes.
-
-`set radio.rxps` echoes the timings it applied, so the periods the radio really
-runs are visible immediately:
-
-```text
-OK - on,level=9(overdrive),preamble=16,rx=32782,sleep=40954
-OK - on,level=10,preamble=32,rx=40375,sleep=106500
-OK - on,level=5,preamble=16,rx=49485,sleep=22750
-```
-
-`get radio.rxps` reports:
-
-```text
-desired=<on|off>,effective=<armed|continuous>,supported=<yes|no>,
-level=<0-10>[(overdrive)|(riskyWorkingMax)][,catch=<symbols>],preamble=<0|16|32>,rx=<us>,sleep=<us>,
-err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
-```
-
-- `desired` is the saved user setting.
-- `level=9(overdrive)` and `level=10(riskyWorkingMax)` mark profiles that run outside the datasheet timer condition. Any other level is guarded.
-- `catch` is how many symbols of a sender's preamble the node actually catches, and appears only for guarded levels. It is not simply the number the level asks for: the sleep floor can shorten the sleep further, and at SF6 with a 16-symbol profile that collapses levels 1-6 onto the same point. Reporting the requested value there would be a lie, so the effective one is reported instead.
-- `effective=armed` means receive duty-cycle is active.
-- `effective=continuous` means RXPS is disabled, unsupported, or the last arm attempt fell back to continuous RX.
-- `fail` counts failed arm operations; each one falls back to continuous RX. `clear stats` resets both this total and the consecutive-failure backoff, granting three fresh arm attempts.
-- `erx` and `eslp` appear only when the driver had to clamp the requested periods, and report the effective periods after driver clamping. On LR1110 the RX window is stretched when `2*rx + sleep` would not cover the extended period Semtech requires, so the real duty cycle can be less economical than `rx`/`sleep` suggest.
-- RXPS is currently supported by the SX1262 and LR1110 wrappers. Other radios remain in continuous RX and reject attempts to enable RXPS.
-- There is intentionally no RXPS watchdog, watchdog command, or periodic recovery. Recovery is limited to the immediate continuous-RX fallback after an arm error. After 3 consecutive arm failures the node stops retrying on every RX restart and stays in continuous RX until the RXPS configuration is set again or `clear stats` grants a fresh set of attempts.
-- On boards with a host-controlled RXEN pin, the RF switch is held in receive mode for the whole duty cycle (otherwise the node would be deaf). An external LNA on that pin therefore stays biased during the sleep windows, so the real power saving is smaller than the `rx`/`sleep` ratio implies.
-
----
-
 
 ### System
 
@@ -617,7 +454,7 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 - `powersaving on`
 - `powersaving off`
 
-**Parameters:**
+**Parameters:** 
 - `on`: enable power saving
 - `off`: disable power saving
 
@@ -641,45 +478,6 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 
 ---
 
-#### View or set reboot interval (Repeater and room server)
-**Usage:**
-- `get reboot.interval`
-- `set reboot.interval <hours>`
-
-**Parameters:**
-- `hours`: 0-255. 0 is disabled
-
-**Default:** `0` (disabled)
-
----
-
-### Backup and Restore
-
-#### Dump the full node configuration as JSON
-**Usage:**
-- `get config`
-
-**Serial Only:** Yes
-
-**Note:** Dumps the current in-memory preferences as a single JSON object, written directly to the serial connection instead of the normal reply buffer. Output is not limited by the usual reply size, so a full dump can be considerably longer than other `get` commands.
-
----
-
-#### Load node configuration from JSON
-**Usage:**
-- `put config`
-
-**Serial Only:** Yes
-
-**Parameters:**
-- After sending `put config`, paste a JSON object (for example, output previously captured from `get config`) and end the input with a line containing only `.`
-
-**Note:** Keys not present in the pasted JSON are left unchanged; unrecognized keys are ignored. This makes it safe to paste a partial or hand-edited JSON object back in.
-
-**Note:** On a successful load, the updated preferences are written to flash immediately — no separate save step is needed.
-
----
-
 ### Routing
 
 #### View or change this node's repeat flag
@@ -688,7 +486,7 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 - `set repeat <state>`
 
 **Parameters:**
-- `state`: `on`|`off`
+  - `state`: `on`|`off`
 
 **Default:** `on`
 
@@ -704,13 +502,13 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
   - `0`: 1 Byte hash size (256 unique ids)[64 max flood]
   - `1`: 2 Byte hash size (65,536 unique ids)[32 max flood]
   - `2`: 3 Byte hash size (16,777,216 unique ids)[21 max flood]
-  - `3`: DO NOT USE (Reserved)
+  - `3`: DO NOT USE (Reserved) 
 
 **Default:** `0`
 
 **Note:** the 'path.hash.mode' sets the low-level ID/hash encoding size used when the repeater adverts. This setting has no impact on what packet ID/hash size this repeater forwards, all sizes should be forwarded on firmware >= 1.14. This feature was added in firmware 1.14
 
-**Temporary Note:** adverts with ID/hash sizes of 2 or 3 bytes may have limited flood propagation in your network while this feature is new as v1.13.0 firmware and older will drop packets with multibyte path ID/hashes as only 1-byte hashes are supported. Consider your install base of firmware >=1.14 has reached a criticality for effective network flooding before implementing higher ID/hash sizes.
+**Temporary Note:** adverts with ID/hash sizes of 2 or 3 bytes may have limited flood propagation in your network while this feature is new as v1.13.0 firmware and older will drop packets with multibyte path ID/hashes as only 1-byte hashes are supported. Consider your install base of firmware >=1.14 has reached a criticality for effective network flooding before implementing higher ID/hash sizes. 
 
 ---
 
@@ -720,17 +518,17 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 - `set loop.detect <state>`
 
 **Parameters:**
-- `state`:
+- `state`: 
   - `off`: no loop detection is performed
   - `minimal`: packets are dropped if repeater's ID/hash appears 4 or more times (1-byte), 2 or more (2-byte), 1 or more (3-byte)
   - `moderate`: packets are dropped if repeater's ID/hash appears 2 or more times (1-byte), 1 or more (2-byte), 1 or more (3-byte)
   - `strict`: packets are dropped if repeater's ID/hash appears 1 or more times (1-byte), 1 or more (2-byte), 1 or more (3-byte)
-
+  
 **Default:** `off`
 
 **Note:** When it is enabled, repeaters will now reject flood packets which look like they are in a loop. This has been happening recently in some meshes when there is just a single 'bad' repeater firmware out there (probably some forked or custom firmware). If the payload is messed with, then forwarded, the same packet ends up causing a packet storm, repeated up to the max 64 hops. This feature was added in firmware 1.14
 
-**Example:** If preference is `loop.detect minimal`, and a 1-byte path size packet is received, the repeater will see if its own ID/hash is already in the path. If it's already encoded 4 times, it will reject the packet.  If the packet uses 2-byte path size, and repeater's own ID/hash is already encoded 2 times, it rejects. If the packet uses 3-byte path size, and the repeater's own ID/hash is already encoded 1 time, it rejects.
+**Example:** If preference is `loop.detect minimal`, and a 1-byte path size packet is received, the repeater will see if its own ID/hash is already in the path. If it's already encoded 4 times, it will reject the packet.  If the packet uses 2-byte path size, and repeater's own ID/hash is already encoded 2 times, it rejects. If the packet uses 3-byte path size, and the repeater's own ID/hash is already encoded 1 time, it rejects. 
 
 ---
 
@@ -809,7 +607,7 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
   - `af = 2` → ~33% duty
   - `af = 3` → ~25% duty
   - `af = 9` → ~10% duty
-    You are responsible for choosing a value that is appropriate for your jurisdiction and channel plan (for example EU 868 Mhz 10% duty cycle regulation).
+  You are responsible for choosing a value that is appropriate for your jurisdiction and channel plan (for example EU 868 Mhz 10% duty cycle regulation).
 
 **Default:** `1.0`
 
@@ -935,12 +733,12 @@ adverts running, set an explicit value in the 60-240 range.
 ### ACL
 
 #### Add, update or remove permissions for a companion
-**Usage:**
+**Usage:** 
 - `setperm <pubkey> <permissions>`
 
 **Parameters:**
 - `pubkey`: Companion public key
-- `permissions`:
+- `permissions`: 
   - `0`: Guest
   - `1`: Read-only
   - `2`: Read-write
@@ -951,7 +749,7 @@ adverts running, set an explicit value in the 60-240 range.
 ---
 
 #### View the current ACL
-**Usage:**
+**Usage:** 
 - `get acl`
 
 **Serial Only:** Yes
@@ -973,7 +771,7 @@ adverts running, set an explicit value in the 60-240 range.
 ### Region Management (v1.10.+)
 
 #### Bulk-load region lists
-**Usage:**
+**Usage:** 
 - `region load`
 - `region load <name> [flood_flag]`
 
@@ -989,16 +787,16 @@ adverts running, set an explicit value in the 60-240 range.
 ---
 
 #### Save any changes to regions made since reboot
-**Usage:**
+**Usage:** 
 - `region save`
 
 ---
 
 #### Allow a region
-**Usage:**
+**Usage:** 
 - `region allowf <name>`
 
-**Parameters:**
+**Parameters:** 
 - `name`: Region name (or `*` for wildcard)
 
 **Note:** Setting on wildcard `*` allows packets without region transport codes
@@ -1006,10 +804,10 @@ adverts running, set an explicit value in the 60-240 range.
 ---
 
 #### Block a region
-**Usage:**
+**Usage:** 
 - `region denyf <name>`
 
-**Parameters:**
+**Parameters:** 
 - `name`: Region name (or `*` for wildcard)
 
 **Note:** Setting on wildcard `*` drops packets without region transport codes
@@ -1017,7 +815,7 @@ adverts running, set an explicit value in the 60-240 range.
 ---
 
 #### Show information for a region
-**Usage:**
+**Usage:** 
 - `region get <name>`
 
 **Parameters:**
@@ -1026,7 +824,7 @@ adverts running, set an explicit value in the 60-240 range.
 ---
 
 #### View or change the home region for this node
-**Usage:**
+**Usage:** 
 - `region home`
 - `region home <name>`
 
@@ -1036,7 +834,7 @@ adverts running, set an explicit value in the 60-240 range.
 ---
 
 #### View or change the default scope region for this node
-**Usage:**
+**Usage:** 
 - `region default`
 - `region default {name|<null>}`
 
@@ -1045,29 +843,8 @@ adverts running, set an explicit value in the 60-240 range.
 
 ---
 
-#### View or set the direct path override for the current remote client
-**Usage:**
-- `get outpath`
-- `set outpath <hop1_hex,hop2_hex,...>`
-- `set outpath direct`
-- `set outpath clear`
-- `set outpath flood`
-
-**Parameters:**
-- `hopN_hex`: Hop hash, `2`, `4`, or `6` hex characters. All hops must use the same width.
-
-**Notes:**
-- These commands require remote client context (they target the caller's ACL entry).
-- The path hash size is inferred from the hop hash width.
-- `outpath` overrides the primary direct route used for replies to the caller.
-- `direct` sets a zero-hop direct route for a caller reachable without repeaters.
-- `clear` forgets the current direct path and allows normal path discovery to repopulate it.
-- `flood` forces replies to use flood packets until the client logs in again.
-
----
-
 #### Create a new region
-**Usage:**
+**Usage:** 
 - `region put <name> [parent_name]`
 
 **Parameters:**
@@ -1118,18 +895,18 @@ region save
 ---
 
 #### Remove a region
-**Usage:**
+**Usage:** 
 - `region remove <name>`
 
 **Parameters:**
 - `name`: Region name
 
-**Note:** Must remove all child regions before the region can be removed
+**Note:** Must remove all child regions before the region can be removed 
 
 ---
 
 #### View all regions
-**Usage:**
+**Usage:** 
 - `region list <filter>`
 
 **Serial Only:** Yes
@@ -1142,7 +919,7 @@ region save
 ---
 
 #### Dump all defined regions and flood permissions
-**Usage:**
+**Usage:** 
 - `region`
 
 **Serial Only:** For firmware older than 1.12.0
@@ -1256,13 +1033,13 @@ region save
 ---
 
 #### Sync this node's clock with GPS time
-**Usage:**
+**Usage:** 
 - `gps sync`
 
 ---
 
 #### Set this node's location based on the GPS coordinates
-**Usage:**
+**Usage:** 
 - `gps setloc`
 
 ---
@@ -1272,8 +1049,8 @@ region save
 - `gps advert`
 - `gps advert <policy>`
 
-**Parameters:**
-- `policy`: `none`|`share`|`prefs`
+**Parameters:** 
+- `policy`: `none`|`share`|`prefs` 
   - `none`: don't include location in adverts
   - `share`: share gps location (from SensorManager)
   - `prefs`: location stored in node's lat and lon settings
@@ -1295,7 +1072,7 @@ region save
 ---
 
 #### View or change the value of a sensor
-**Usage:**
+**Usage:** 
 - `sensor get <key>`
 - `sensor set <key> <value>`
 
@@ -1342,7 +1119,7 @@ region save
 - `set bridge.source <source>`
 
 **Parameters:**
-- `source`:
+- `source`: 
   - `logRx`: bridges received packets
   - `logTx`: bridges transmitted packets
 
@@ -1373,7 +1150,7 @@ region save
 ---
 
 #### Set the ESP-Now secret
-**Usage:**
+**Usage:** 
 - `get bridge.secret`
 - `set bridge.secret <secret>`
 
