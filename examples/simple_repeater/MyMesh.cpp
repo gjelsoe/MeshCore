@@ -729,7 +729,7 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
     memcpy(&sender_timestamp, data, 4); // timestamp (by sender's RTC clock - which could be wrong)
     uint8_t flags = (data[4] >> 2);        // message attempt number, and other flags
 
-    if (!(flags == TXT_TYPE_PLAIN || flags == TXT_TYPE_CLI_DATA || flags == TXT_TYPE_CLI_COMMAND)) {
+    if (!(flags == TXT_TYPE_PLAIN || flags == TXT_TYPE_CLI_DATA)) {
       MESH_DEBUG_PRINTLN("onPeerDataRecv: unsupported text type received: flags=%02x", (uint32_t)flags);
     } else if (sender_timestamp >= client->last_timestamp) { // prevent replay attacks
       bool is_retry = (sender_timestamp == client->last_timestamp);
@@ -823,7 +823,6 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
   uint8_t type = packet->payload[0] & 0xF0;    // just test upper 4 bits
   if (type == CTL_TYPE_NODE_DISCOVER_REQ && packet->payload_len >= 6
       && !_prefs.disable_fwd && discover_limiter.allow(rtc_clock.getCurrentTime())
-      && !isHiddenNode()   // this node wishes to NOT be discoverable
   ) {
     int i = 1;
     uint8_t  filter = packet->payload[i++];
@@ -896,7 +895,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
                mesh::RTCClock &rtc, mesh::MeshTables &tables)
     : mesh::Mesh(radio, ms, rng, rtc, *new StaticPoolPacketManager(32), tables),
       region_map(key_store), temp_map(key_store),
-      _cli(board, rtc, sensors, region_map, acl, &_prefs, this, getRxPowerSavingControl()),
+      _cli(board, rtc, sensors, region_map, acl, &_prefs, this),
       telemetry(MAX_PACKET_PAYLOAD - 4),
       discover_limiter(4, 120),  // max 4 every 2 minutes
       anon_limiter(4, 180)   // max 4 every 3 minutes
@@ -941,7 +940,6 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   _prefs.flood_max_advert = 8;
   _prefs.interference_threshold = 0; // disabled
   _prefs.cad_enabled = 0;            // hardware CAD before TX (off by default; 'set cad on')
-  _prefs.loop_detect = LOOP_DETECT_MINIMAL;
 
   // bridge defaults
   _prefs.bridge_enabled = 1;    // enabled
@@ -966,26 +964,14 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   _prefs.rx_boosted_gain = 1; // enabled by default;
 #endif
 #endif
-
-// PowerSaving variant
-#ifdef RADIO_FEM_RXGAIN
-  _prefs.radio_fem_rxgain = RADIO_FEM_RXGAIN;
-#else
-  _prefs.radio_fem_rxgain = 0;
-#endif
-
-#ifdef RADIO_FEM_TXGAIN
-  _prefs.radio_fem_txgain = RADIO_FEM_TXGAIN;   // board-specific default for PA
-#else
+  _prefs.radio_fem_rxgain = 0; // PowerSaving and better signal
   _prefs.radio_fem_txgain = 0;
-#endif
 
   pending_discover_tag = 0;
   pending_discover_until = 0;
 
   memset(default_scope.key, 0, sizeof(default_scope.key));
 
-  // PowerSaving variant
   // PowerSaving defaults
   _prefs.powersaving_enabled = 1;
 
@@ -1000,8 +986,8 @@ void MyMesh::begin(FILESYSTEM *fs) {
   _fs = fs;
   // load persisted prefs
   _cli.loadPrefs(_fs);
-  _cron.begin(&_cli, getRTCClock(), *_fs);
   acl.load(_fs, self_id);
+  _cron.begin(&_cli, getRTCClock(), *_fs);
   // TODO: key_store.begin();
   region_map.load(_fs);
 
@@ -1032,8 +1018,6 @@ void MyMesh::begin(FILESYSTEM *fs) {
 #endif
 
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
-  // PowerSaving variant
-  _prefs.getRadioPrefs()->applyRxPowerSaving(_prefs.sf, _prefs.bw);
   radio_driver.setTxPower(_prefs.tx_power_dbm);
 
   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
@@ -1471,7 +1455,7 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char *
   } else if (strncmp(command, "cron", 4) == 0 && (command[4] == ' ' || command[4] == '\0')) {
     const char* cron_args = (command[4] == ' ') ? command + 5 : "";
     _cron.handleCommand(cron_args, reply, *_fs, sender);
-  } else{
+  } else {
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
 }
@@ -1482,7 +1466,6 @@ void MyMesh::loop() {
 #endif
 
   mesh::Mesh::loop();
-  _cron.loop();
 
   if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
     mesh::Packet *pkt = createSelfAdvert();
@@ -1501,16 +1484,14 @@ void MyMesh::loop() {
   if (set_radio_at && millisHasNowPassed(set_radio_at)) { // apply pending (temporary) radio params
     set_radio_at = 0;                                     // clear timer
     radio_driver.setParams(pending_freq, pending_bw, pending_sf, pending_cr);
-    // PowerSaving variant
-    _prefs.getRadioPrefs()->applyRxPowerSaving(pending_sf, pending_bw);
+    applyRxPowerSavingConfig(_prefs, pending_sf, pending_bw);
     MESH_DEBUG_PRINTLN("Temp radio params");
   }
 
   if (revert_radio_at && millisHasNowPassed(revert_radio_at)) { // revert radio params to orig
     revert_radio_at = 0;                                        // clear timer
     radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
-    // PowerSaving variant
-    _prefs.getRadioPrefs()->applyRxPowerSaving(_prefs.sf, _prefs.bw);
+    applyRxPowerSavingConfig(_prefs, _prefs.sf, _prefs.bw);
     MESH_DEBUG_PRINTLN("Radio params restored");
   }
 
@@ -1531,7 +1512,7 @@ bool MyMesh::hasPendingWork() const {
 #if defined(WITH_BRIDGE)
   if (bridge.isRunning()) return true;  // bridge needs WiFi radio, can't sleep
 #endif
-  // PowerSaving variant
-  return _mgr->getOutboundTotal() > 0 || _mgr->getInboundTotal() > 0 ||  // rxdelay packets wait in the inbound queue
-         isTransmitting() || _prefs.getRadioPrefs()->isRxPowerSavingCalibrationActive();
+  const RxPowerSavingControl* control = getRxPowerSavingControl();
+  if (control != nullptr && control->isRxPowerSavingCalibrationActive()) return true;
+  return _mgr->getOutboundTotal() > 0;
 }
