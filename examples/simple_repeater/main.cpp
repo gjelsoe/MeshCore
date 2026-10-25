@@ -43,6 +43,115 @@ static char command[160];
 static char ethernet_command[160];
 #endif
 
+// Command history (up/down arrow recall), serial CLI only.
+#define CLI_HISTORY_SIZE 8
+static char cli_history[CLI_HISTORY_SIZE][160];
+static int cli_history_count = 0;   // number of entries actually stored
+static int cli_history_next = 0;    // ring-buffer write position
+static int cli_history_pos = -1;    // -1 = not browsing; 0..count-1 = index back from newest
+
+// Small state machine for parsing ANSI escape sequences: arrow keys
+// (ESC '[' 'A'/'B'/'C'/'D') and the Forward-Delete key (ESC '[' '3' '~'),
+// since the bytes can arrive across separate loop() iterations rather
+// than all at once.
+enum EscState { ESC_NONE, ESC_GOT_ESC, ESC_GOT_BRACKET, ESC_GOT_DIGIT };
+static EscState esc_state = ESC_NONE;
+static char esc_digit = 0;  // pending digit between '[' and '~', e.g. '3' for Delete
+
+// Cursor position within 'command' (0..strlen(command)), for left/right
+// arrow editing and correct redraw when recalling history.
+static int cmd_cursor = 0;
+
+// Moves the terminal's visual cursor left, without erasing anything.
+static void cliMoveCursorLeft() {
+  if (cmd_cursor > 0) { cmd_cursor--; Serial.print('\b'); }
+}
+
+// Moves the terminal's visual cursor right, without erasing anything.
+static void cliMoveCursorRight() {
+  int len = strlen(command);
+  if (cmd_cursor < len) { Serial.print(command[cmd_cursor]); cmd_cursor++; }
+}
+
+// Prints the remainder of 'command' after the cursor, so the terminal's
+// visual cursor catches up to cmd_cursor before a full-line operation.
+static void cliMoveCursorToEnd() {
+  Serial.print(command + cmd_cursor);
+  cmd_cursor = strlen(command);
+}
+
+// Inserts 'c' at cmd_cursor, shifting any text after it to the right,
+// and redraws only the affected tail (not the whole line).
+static void cliInsertChar(char c) {
+  int len = strlen(command);
+  if (len >= (int)sizeof(command) - 1) return;  // buffer full
+  memmove(command + cmd_cursor + 1, command + cmd_cursor, len - cmd_cursor + 1);  // incl. null term
+  command[cmd_cursor] = c;
+  Serial.print(command + cmd_cursor);  // print new char + everything after it
+  cmd_cursor++;
+  int tail_len = (len + 1) - cmd_cursor;  // chars now after the cursor
+  for (int i = 0; i < tail_len; i++) Serial.print('\b');  // walk cursor back
+}
+
+// Deletes the character immediately before cmd_cursor (Backspace/DEL),
+// shifting text after it left and redrawing only the affected tail.
+static void cliDeleteBeforeCursor() {
+  if (cmd_cursor == 0) return;
+  int len = strlen(command);
+  memmove(command + cmd_cursor - 1, command + cmd_cursor, len - cmd_cursor + 1);  // incl. null term
+  cmd_cursor--;
+  Serial.print('\b');                  // step back over the deleted char
+  Serial.print(command + cmd_cursor);  // redraw shifted tail
+  Serial.print(' ');                   // clear the leftover char at the old end
+  int tail_len = (len - cmd_cursor);   // tail chars + the trailing space just printed
+  for (int i = 0; i < tail_len; i++) Serial.print('\b');
+}
+
+// Deletes the character at cmd_cursor (Delete key / forward-delete),
+// shifting text after it left and redrawing only the affected tail.
+// The cursor position itself doesn't move.
+static void cliDeleteAtCursor() {
+  int len = strlen(command);
+  if (cmd_cursor >= len) return;  // nothing to the right of the cursor
+  memmove(command + cmd_cursor, command + cmd_cursor + 1, len - cmd_cursor);  // incl. null term
+  Serial.print(command + cmd_cursor);  // redraw shifted tail
+  Serial.print(' ');                   // clear the leftover char at the old end
+  int tail_len = (len - cmd_cursor);   // tail chars (post-shift) + the trailing space
+  for (int i = 0; i < tail_len; i++) Serial.print('\b');
+}
+
+// Clears the currently-displayed command (assumes the visual cursor is
+// already at the end - call cliMoveCursorToEnd() first) and replaces
+// 'command' with 'text', then reprints it with the cursor at the end.
+static void cliReplaceLine(const char* text) {
+  int len = strlen(command);
+  for (int i = 0; i < len; i++) Serial.print("\b \b");
+  strncpy(command, text, sizeof(command) - 1);
+  command[sizeof(command) - 1] = 0;
+  Serial.print(command);
+  cmd_cursor = strlen(command);
+}
+
+static void cliHistoryPush(const char* line) {
+  if (line[0] == 0) return;  // don't store empty lines
+  // Skip if identical to the most recently stored entry
+  if (cli_history_count > 0) {
+    int last = (cli_history_next - 1 + CLI_HISTORY_SIZE) % CLI_HISTORY_SIZE;
+    if (strcmp(cli_history[last], line) == 0) return;
+  }
+  strncpy(cli_history[cli_history_next], line, sizeof(cli_history[0]) - 1);
+  cli_history[cli_history_next][sizeof(cli_history[0]) - 1] = 0;
+  cli_history_next = (cli_history_next + 1) % CLI_HISTORY_SIZE;
+  if (cli_history_count < CLI_HISTORY_SIZE) cli_history_count++;
+}
+
+// idx counts back from the newest entry (0 = newest). Returns NULL if out of range.
+static const char* cliHistoryGet(int idx) {
+  if (idx < 0 || idx >= cli_history_count) return NULL;
+  int pos = (cli_history_next - 1 - idx + CLI_HISTORY_SIZE * 2) % CLI_HISTORY_SIZE;
+  return cli_history[pos];
+}
+
 // State for the non-blocking "put config" paste capture. Kept outside the
 // normal command[] buffer so it can span many loop() iterations without
 // ever blocking the_mesh.loop() (mesh RX/forwarding) while a user pastes
@@ -186,6 +295,17 @@ void loop() {
     // the_mesh.loop() while the user is typing or pasting.
     while (Serial.available() && config_paste_len < CONFIG_PASTE_BUF_SIZE - 1) {
       char c = Serial.read();
+
+      if (c == 8 || c == 127) {   // Backspace (0x08) or DEL (0x7F)
+        // Only edit within the current line; never delete a previous line's '\r'.
+        if (config_paste_len > 0 && config_paste_buf[config_paste_len - 1] != '\r') {
+          config_paste_len--;
+          config_paste_buf[config_paste_len] = 0;
+          Serial.print("\b \b");  // erase char on the terminal
+        }
+        continue;
+      }
+
       if (c == '\n') continue;   // same convention as command parsing below
       Serial.print(c);
       config_paste_buf[config_paste_len++] = c;
@@ -224,15 +344,84 @@ void loop() {
       command[0] = 0;
       len = 0;
     }
-    while (Serial.available() && len < sizeof(command)-1) {
+    if (len == 0) cmd_cursor = 0;  // keep the edit cursor in sync with an empty buffer
+    while (Serial.available() && (int)strlen(command) < (int)sizeof(command)-1) {
       char c = Serial.read();
-      if (c != '\n') {
-        command[len++] = c;
-        command[len] = 0;
-        Serial.print(c);
+
+      // Feed the ANSI escape sequence state machine first. Bytes belonging
+      // to an in-progress sequence are consumed here and never reach the
+      // normal command-editing logic below.
+      if (esc_state == ESC_NONE && c == 27) {          // ESC
+        esc_state = ESC_GOT_ESC;
+        continue;
       }
-      if (c == '\r') break;
+      if (esc_state == ESC_GOT_ESC) {
+        esc_state = (c == '[') ? ESC_GOT_BRACKET : ESC_NONE;
+        continue;
+      }
+      if (esc_state == ESC_GOT_BRACKET) {
+        esc_state = ESC_NONE;
+        if (c == 'A') {        // Up arrow: older command
+          int next_pos = cli_history_pos + 1;
+          const char* h = cliHistoryGet(next_pos);
+          if (h != NULL) {
+            cli_history_pos = next_pos;
+            cliMoveCursorToEnd();
+            cliReplaceLine(h);
+          }
+        } else if (c == 'B') {  // Down arrow: newer command (or blank)
+          if (cli_history_pos > 0) {
+            cli_history_pos--;
+            const char* h = cliHistoryGet(cli_history_pos);
+            cliMoveCursorToEnd();
+            cliReplaceLine(h != NULL ? h : "");
+          } else if (cli_history_pos == 0) {
+            cli_history_pos = -1;
+            cliMoveCursorToEnd();
+            cliReplaceLine("");
+          }
+        } else if (c == 'C') {  // Right arrow
+          cliMoveCursorRight();
+        } else if (c == 'D') {  // Left arrow
+          cliMoveCursorLeft();
+        } else if (c >= '0' && c <= '9') {
+          // Start of a multi-byte sequence like ESC[3~ (Delete). Remember
+          // the digit and wait for the terminating '~'.
+          esc_digit = c;
+          esc_state = ESC_GOT_DIGIT;
+        }
+        // Any other final byte (Home/End etc.) is discarded.
+        continue;
+      }
+      if (esc_state == ESC_GOT_DIGIT) {
+        esc_state = ESC_NONE;
+        if (c == '~' && esc_digit == '3') {  // Delete key: ESC[3~
+          cliDeleteAtCursor();
+        }
+        // Any other terminator (other ESC[n~ codes) is discarded.
+        continue;
+      }
+
+      if (c == 8 || c == 127) {   // Backspace (0x08) or DEL (0x7F)
+        cliDeleteBeforeCursor();
+        continue;
+      }
+
+      if (c == '\r') {
+        // Append the terminator at the true end of the buffer, regardless
+        // of where the edit cursor currently sits.
+        int l = strlen(command);
+        if (l < (int)sizeof(command) - 1) {
+          command[l] = '\r';
+          command[l + 1] = 0;
+        }
+        break;
+      }
+
+      if (c != '\n') cliInsertChar(c);
     }
+
+    len = strlen(command);
     if (len == sizeof(command)-1) {  // buffer full: treat as a completed line
       command[sizeof(command)-2] = '\r';  // place end-of-line marker inside the buffer
       command[sizeof(command)-1] = 0;     // keep the buffer NUL-terminated
@@ -241,6 +430,9 @@ void loop() {
     if (len > 0 && command[len - 1] == '\r') {  // received complete line
       Serial.print('\n');
       command[len - 1] = 0;  // replace newline with C string null terminator
+
+      cliHistoryPush(command);
+      cli_history_pos = -1;
 
       const char* GET_CONFIG_PREFIX = "get config";
       const char* PUT_CONFIG_PREFIX = "put config";
@@ -288,6 +480,7 @@ void loop() {
       }
 
       command[0] = 0;  // reset command buffer
+      cmd_cursor = 0;
     }
   }
 
