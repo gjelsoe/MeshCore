@@ -1303,7 +1303,11 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char *
       sendNodeDiscoverReq();
       strcpy(reply, "OK - Discover sent");
     }
-  } else{
+  } else if (memcmp(command, "report", 6) == 0) {
+    const char* arg = command + 6;
+    while (*arg == ' ') arg++;
+    scriptHandleCommand(arg, reply, sender);
+  } else {
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
 }
