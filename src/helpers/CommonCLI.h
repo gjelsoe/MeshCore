@@ -317,7 +317,6 @@ class CommonCLI {
   mesh::RTCClock* _rtc;
   NodePrefs* _prefs;
   CommonCLICallbacks* _callbacks;
-  RxPowerSavingControl* _rxps_control;
   mesh::MainBoard* _board;
   SensorManager* _sensors;
   RegionMap* _region_map;
@@ -333,11 +332,8 @@ class CommonCLI {
   void handleSetCmd(uint32_t sender_timestamp, char* command, char* reply);
 
 public:
-  CommonCLI(mesh::MainBoard& board, mesh::RTCClock& rtc, SensorManager& sensors,
-            RegionMap& region_map, ClientACL& acl, NodePrefs* prefs,
-            CommonCLICallbacks* callbacks, RxPowerSavingControl* rxps_control = nullptr)
-      : _rtc(&rtc), _prefs(prefs), _callbacks(callbacks), _rxps_control(rxps_control),
-        _board(&board), _sensors(&sensors), _region_map(&region_map), _acl(&acl) { }
+  CommonCLI(mesh::MainBoard& board, mesh::RTCClock& rtc, SensorManager& sensors, RegionMap& region_map, ClientACL& acl, NodePrefs* prefs, CommonCLICallbacks* callbacks)
+      : _board(&board), _rtc(&rtc), _sensors(&sensors), _region_map(&region_map), _acl(&acl), _prefs(prefs), _callbacks(callbacks) { }
 
   void loadPrefs(FILESYSTEM* _fs);
   bool savePrefs(FILESYSTEM* _fs);
