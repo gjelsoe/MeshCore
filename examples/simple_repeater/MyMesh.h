@@ -38,7 +38,9 @@
 #include "RateLimiter.h"
 #include "ConfigTarget.h"     // must be after any other using get/put config
 #include "ChannelFilter.h"
-
+#if defined(REPORT_ENGINE)
+#include "ReportEngine.h"
+#endif
 #ifdef WITH_BRIDGE
 extern AbstractBridge* bridge;
 #endif
@@ -129,6 +131,21 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 
   File openAppend(const char* fname);
   bool isLooped(const mesh::Packet* packet, const uint8_t max_counters[]);
+#if defined(REPORT_ENGINE)
+  // ── Report engine ─────────────────────────────────────────────────────────
+  ScriptRule    _scriptRules[MAX_SCRIPT_RULES];
+  uint8_t       _scriptRuleCount  = 0;
+  unsigned long _nextScriptEval   = 0;
+  bool          _scriptRulesDirty = false;
+  BootConfig    _bootConfig       = {};
+  unsigned long _nextBootMsg      = 0;
+
+  void _scriptLoad();
+  void _scriptSave();
+  void _scriptSendMessage(const ScriptRule& rule, const char* text);
+  void _scriptSendBootMessage();
+  void _scriptEvaluate();
+#endif
 
 protected:
   float getAirtimeBudgetFactor() const override {

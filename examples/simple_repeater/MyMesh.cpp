@@ -742,7 +742,7 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
       if (is_retry) {
         *reply = 0;
       } else {
-        handleCommand(sender_timestamp, NULL, command, reply);
+        handleCommand(sender_timestamp, client, command, reply);
       }
       int text_len = strlen(reply);
       if (text_len > 0) {
