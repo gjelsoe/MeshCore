@@ -290,10 +290,12 @@ void RegionMap::printChildRegions(int indent, const RegionEntry* parent, Stream&
     out.print(' ');
   }
 
+  const char* hid = (parent->flags & REGION_HIDDEN) ? "#" : "";
+
   if (parent->flags & REGION_DENY_FLOOD) {
-    out.printf("%s%s\n", skip_hash(parent->name), parent->id == home_id ? "^" : "");
+    out.printf("%s%s%s\n", skip_hash(parent->name), parent->id == home_id ? "^" : "", hid);
   } else {
-    out.printf("%s%s F\n", skip_hash(parent->name), parent->id == home_id ? "^" : "");
+    out.printf("%s%s%s F\n", skip_hash(parent->name), parent->id == home_id ? "^" : "", hid);
   }
 
   for (int i = 0; i < num_regions; i++) {
@@ -318,7 +320,7 @@ size_t RegionMap::exportTo(char *dest, size_t max_len) const {
 
 int RegionMap::exportNamesTo(char *dest, int max_len, uint8_t mask, bool invert) {
   char *dp = dest;
-  
+
   // Check wildcard region
   bool wildcard_matches = invert ? (wildcard.flags & mask) : !(wildcard.flags & mask);
   if (wildcard_matches) {
@@ -328,17 +330,17 @@ int RegionMap::exportNamesTo(char *dest, int max_len, uint8_t mask, bool invert)
 
     for (int i = 0; i < num_regions; i++) {
     auto region = &regions[i];
-    
+
     // Check if region matches the filter criteria
     bool region_matches = invert ? (region->flags & mask) : !(region->flags & mask);
-    
+
     if (region_matches) {
       int len = strlen(skip_hash(region->name));
       bool hidden = (region->flags & REGION_HIDDEN);
       if ((dp - dest) + len + (hidden ? 1 : 0) + 2 < max_len) {   // only append if name (+ marker) will fit
         memcpy(dp, skip_hash(region->name), len);
         dp += len;
-        if (hidden) *dp++ = '!';
+        if (hidden) *dp++ = '#';
         *dp++ = ',';
       }
     }
