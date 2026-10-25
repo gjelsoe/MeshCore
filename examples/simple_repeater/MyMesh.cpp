@@ -1313,6 +1313,10 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char* 
   } else if (strncmp(command, "filter", 6) == 0 && (command[6] == ' ' || command[6] == '\0')) {
     const char* filter_args = (command[6] == ' ') ? command + 7 : "";
     _filter.handleCommand(filter_args, reply, *_fs, sender);
+  } else if (memcmp(command, "report", 6) == 0) {
+    const char* arg = command + 6;
+    while (*arg == ' ') arg++;
+    scriptHandleCommand(arg, reply, sender);
   } else {
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
