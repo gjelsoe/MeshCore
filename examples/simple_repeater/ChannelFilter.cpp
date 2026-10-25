@@ -153,8 +153,52 @@ bool ChannelFilter::_evalScalar(FilterField field, FilterOp op, int16_t val, con
   }
 }
 
-bool ChannelFilter::_ruleMatches(const FilterRule &rule, const mesh::Packet *pkt, int16_t rssi) const {
-  // PATH field — OR-list match on last hop
+// Evaluate source AND condition — checks payload[1] as src_hash.
+// Returns true if source condition passes (or is not set).
+static bool evalSource(const FilterRule &rule, const mesh::Packet *pkt) {
+  if (rule.source_hash_count == 0) return true; // no source filter
+
+  uint8_t pt = pkt->getPayloadType();
+
+  // Source check only applicable where payload[1] is src_hash
+  bool applicable = (pt == PAYLOAD_TYPE_REQ || // req
+                     pt == PAYLOAD_TYPE_RESPONSE || // resp
+                     pt == PAYLOAD_TYPE_TXT_MSG || // txt
+                     pt == PAYLOAD_TYPE_ANON_REQ || // anonreq
+                     pt == PAYLOAD_TYPE_PATH);  // path
+  if (!applicable) return true;    // auto-true for advert/ack/ctrl/etc.
+
+  if (pkt->payload_len < 2) return false;
+  uint8_t src = pkt->payload[1];
+  for (uint8_t i = 0; i < rule.source_hash_count; i++) {
+    if (rule.source_hashes[i] == src) return true;
+  }
+  return false;
+}
+
+// Evaluate scope AND condition — checks packet's region against named region.
+// Returns true if scope condition passes (or is not set).
+static bool evalScope(const FilterRule &rule, const mesh::Packet *pkt, const RegionMap *region_map) {
+  if (rule.scope_name[0] == '\0') return true; // no scope filter
+  if (!region_map) return true;                // no region_map available — skip check
+
+  // Direct packets have no transport_codes — scope check auto-passes
+  if (!pkt->hasTransportCodes()) return true;
+
+  RegionMap *rm = const_cast<RegionMap *>(region_map);
+  const RegionEntry *target = rm->findByName(rule.scope_name);
+  if (!target) return false; // unknown scope — no match
+
+  const RegionEntry *pkt_region = rm->findMatch(const_cast<mesh::Packet *>(pkt), 0);
+  if (!pkt_region) return false;
+
+  return pkt_region->id == target->id;
+}
+
+bool ChannelFilter::_ruleMatches(const FilterRule &rule, const mesh::Packet *pkt, int16_t rssi,
+                                 const RegionMap *region_map) const {
+  // --- Primary field evaluation ---
+
   if (rule.field == FilterField::PATH) {
     uint8_t hash_size = pkt->getPathHashSize();
     uint8_t hash_count = pkt->getPathHashCount();
@@ -172,14 +216,8 @@ bool ChannelFilter::_ruleMatches(const FilterRule &rule, const mesh::Packet *pkt
     }
     bool primary = (rule.op == FilterOp::EQ) ? found : !found;
     if (!primary) return false;
-    if (rule.and_field != FILTER_FIELD_NONE) {
-      if (!_evalScalar((FilterField)rule.and_field, rule.and_op, rule.and_value, pkt, rssi)) return false;
-    }
-    return true;
-  }
 
-  // CHANNEL field — OR-list match
-  if (rule.field == FilterField::CHANNEL) {
+  } else if (rule.field == FilterField::CHANNEL) {
     uint8_t pt = pkt->getPayloadType();
     if (pt != 0x05 && pt != 0x06) return false;
     if (pkt->payload_len < 1) return false;
@@ -199,21 +237,53 @@ bool ChannelFilter::_ruleMatches(const FilterRule &rule, const mesh::Packet *pkt
     else
       return false;
     if (!primary) return false;
-    if (rule.and_field != FILTER_FIELD_NONE) {
-      if (!_evalScalar((FilterField)rule.and_field, rule.and_op, rule.and_value, pkt, rssi)) return false;
-    }
-    return true;
+
+  } else if (rule.field == FilterField::REPEATER) {
+    uint8_t pt = pkt->getPayloadType();
+    /*
+    bool is_mgmt = (pt == PAYLOAD_TYPE_REQ || pt == PAYLOAD_TYPE_RESPONSE || pt == PAYLOAD_TYPE_TXT_MSG ||
+                    pt == PAYLOAD_TYPE_ACK || pt == PAYLOAD_TYPE_ADVERT || pt == PAYLOAD_TYPE_ANON_REQ ||
+                    pt == PAYLOAD_TYPE_PATH || pt == PAYLOAD_TYPE_CONTROL);
+    */
+    bool is_mgmt = (pt == PAYLOAD_TYPE_ANON_REQ || pt == PAYLOAD_TYPE_REQ || pt == PAYLOAD_TYPE_RESPONSE ||
+                    pt == PAYLOAD_TYPE_ACK || pt == PAYLOAD_TYPE_TXT_MSG || pt == PAYLOAD_TYPE_PATH);
+
+
+    if (!is_mgmt) return false;
+
+  } else if (rule.field == FilterField::SCOPE) {
+    // SCOPE as primary field — packet must match named region
+    if (!pkt->hasTransportCodes()) return false;
+    if (!region_map || rule.scope_name[0] == '\0') return false;
+    RegionMap *rm = const_cast<RegionMap *>(region_map);
+    const RegionEntry *target = rm->findByName(rule.scope_name);
+    if (!target) return false;
+    const RegionEntry *pkt_region = rm->findMatch(const_cast<mesh::Packet *>(pkt), 0);
+    if (!pkt_region) return false;
+    if (pkt_region->id != target->id) return false;
+
+  } else {
+    // Scalar primary condition
+    if (!_evalScalar(rule.field, rule.op, rule.value, pkt, rssi)) return false;
   }
 
-  // Scalar primary condition
-  if (!_evalScalar(rule.field, rule.op, rule.value, pkt, rssi)) return false;
+  // --- Universal AND conditions (applied after any primary field) ---
+
+  // Scalar AND condition
   if (rule.and_field != FILTER_FIELD_NONE) {
     if (!_evalScalar((FilterField)rule.and_field, rule.and_op, rule.and_value, pkt, rssi)) return false;
   }
+
+  // Source AND condition
+  if (!evalSource(rule, pkt)) return false;
+
+  // Scope AND condition
+  if (!evalScope(rule, pkt, region_map)) return false;
+
   return true;
 }
 
-bool ChannelFilter::evaluate(const mesh::Packet *pkt, int16_t rssi) const {
+bool ChannelFilter::evaluate(const mesh::Packet *pkt, int16_t rssi, const RegionMap *region_map) const {
   if (!pkt) return false;
   const FilterProfileSerializer *prof = &_profiles[_active];
   const FilterRule *rules = prof->getRules();
@@ -221,7 +291,7 @@ bool ChannelFilter::evaluate(const mesh::Packet *pkt, int16_t rssi) const {
   for (uint8_t i = 0; i < MAX_FILTER_RULES; i++) {
     const FilterRule &rule = rules[i];
     if (!rule.in_use || !rule.enabled) continue;
-    if (_ruleMatches(rule, pkt, rssi)) {
+    if (_ruleMatches(rule, pkt, rssi, region_map)) {
       return rule.action == FilterAction::DROP;
     }
   }
@@ -251,6 +321,10 @@ static const char *fieldStr(FilterField f) {
     return "snr";
   case FilterField::RSSI:
     return "rssi";
+  case FilterField::REPEATER:
+    return "repeater";
+  case FilterField::SCOPE:
+    return "scope";
   default:
     return "?";
   }
@@ -341,6 +415,18 @@ void ChannelFilter::formatRuleValue(const FilterRule &rule, char *out, int outle
       pos += snprintf(out + pos, outlen - pos, "0x%02X", rule.channel_hashes[i]);
     }
     out[pos] = '\0';
+  } else if (rule.field == FilterField::REPEATER) {
+    // Show source hashes if present
+    if (rule.source_hash_count > 0) {
+      int pos = snprintf(out, outlen, "src");
+      for (uint8_t i = 0; i < rule.source_hash_count && pos < outlen - 5; i++) {
+        pos += snprintf(out + pos, outlen - pos, " 0x%02X", rule.source_hashes[i]);
+      }
+    } else {
+      out[0] = '\0';
+    }
+  } else if (rule.field == FilterField::SCOPE) {
+    snprintf(out, outlen, "%s", rule.scope_name);
   } else if (rule.field == FilterField::SNR) {
     snprintf(out, outlen, "%d", (int)(rule.value / 4));
   } else {
@@ -349,9 +435,10 @@ void ChannelFilter::formatRuleValue(const FilterRule &rule, char *out, int outle
 }
 
 static int formatRuleLine(const FilterRule &rule, uint8_t idx, char *buf, int buflen) {
-  char val_buf[32];
+  char val_buf[48];
   ChannelFilter::formatRuleValue(rule, val_buf, (int)sizeof(val_buf));
 
+  // Build scalar AND suffix
   char and_buf[48] = "";
   if (rule.and_field != FILTER_FIELD_NONE) {
     char and_val_buf[32];
@@ -370,9 +457,35 @@ static int formatRuleLine(const FilterRule &rule, uint8_t idx, char *buf, int bu
     snprintf(and_buf, sizeof(and_buf), " and %s %s %s", fieldStr(af), opStr(rule.and_op), and_val_buf);
   }
 
-  return snprintf(buf, buflen, "%d%s %s %s %s %s%s\n", idx, rule.enabled ? "" : "*",
+  // Build source AND suffix
+  char src_buf[32] = "";
+  if (rule.source_hash_count > 0) {
+    int pos = snprintf(src_buf, sizeof(src_buf), " and source");
+    for (uint8_t i = 0; i < rule.source_hash_count && pos < (int)sizeof(src_buf) - 5; i++) {
+      pos += snprintf(src_buf + pos, sizeof(src_buf) - pos, " 0x%02X", rule.source_hashes[i]);
+    }
+  }
+
+  // Build scope AND suffix
+  char scope_buf[32] = "";
+  if (rule.scope_name[0] != '\0') {
+    snprintf(scope_buf, sizeof(scope_buf), " and scope %s", rule.scope_name);
+  }
+
+  // REPEATER and SCOPE primary fields have no op in output
+  if (rule.field == FilterField::REPEATER) {
+    return snprintf(buf, buflen, "%d%s %s repeater%s%s\n", idx, rule.enabled ? "" : "*",
+                    rule.action == FilterAction::DROP ? "drop" : "allow", src_buf, scope_buf);
+  }
+  if (rule.field == FilterField::SCOPE) {
+    // scope_name is already shown as the primary value — don't repeat it as an AND suffix
+    return snprintf(buf, buflen, "%d%s %s scope %s%s\n", idx, rule.enabled ? "" : "*",
+                    rule.action == FilterAction::DROP ? "drop" : "allow", val_buf, src_buf);
+  }
+
+  return snprintf(buf, buflen, "%d%s %s %s %s %s%s%s%s\n", idx, rule.enabled ? "" : "*",
                   rule.action == FilterAction::DROP ? "drop" : "allow", fieldStr(rule.field), opStr(rule.op),
-                  val_buf, and_buf);
+                  val_buf, and_buf, src_buf, scope_buf);
 }
 
 #define FILTER_REPLY_BUDGET     128
@@ -455,10 +568,15 @@ void ChannelFilter::_listRules(char *reply, uint8_t page, bool is_remote, uint8_
   for (uint8_t i = start; i < end; i++) {
     char line_buf[80];
     formatRuleLine(rules[indexes[i]], indexes[i], line_buf, sizeof(line_buf));
-    pos += snprintf(reply + pos, FILTER_REPLY_BUDGET - pos, "%s", line_buf);
+    int written = snprintf(reply + pos, FILTER_REPLY_BUDGET - pos, "%s", line_buf);
+    if (written > 0) pos += written;
+    if (pos >= FILTER_REPLY_BUDGET) {
+      pos = FILTER_REPLY_BUDGET;
+      break;
+    }
   }
 
-  if (page + 1 < num_pages) {
+  if (page + 1 < num_pages && pos < FILTER_REPLY_BUDGET) {
     uint8_t pnum = (profile_num == 0) ? 0 : profile_num;
     if (pnum == 0) {
       snprintf(reply + pos, FILTER_REPLY_BUDGET - pos, "-> filter list %d", page + 1);
@@ -473,6 +591,7 @@ void ChannelFilter::_listRules(char *reply, uint8_t page, bool is_remote, uint8_
 // ---------------------------------------------------------------------------
 
 void ChannelFilter::handleCommand(const char *args, char *reply, FILESYSTEM &fs, ClientInfo *sender) {
+  if (!args) args = ""; // guard against null input
   bool is_remote = (sender != nullptr);
   FilterParseResult res = parseFilterCommand(args);
 
