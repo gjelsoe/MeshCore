@@ -36,6 +36,7 @@
 #include <helpers/RegionMap.h>
 #include <helpers/RoutingPolicy.h>
 #include "RateLimiter.h"
+#include "ConfigTarget.h"     // must be after any other using get/put config
 
 #ifdef WITH_BRIDGE
 extern AbstractBridge* bridge;
@@ -159,6 +160,13 @@ protected:
 
 #if ENV_INCLUDE_GPS == 1
   void applyGpsPrefs() {
+    // If powersaving on, apply powersaving to sensors
+    if (_prefs.powersaving_enabled) {
+      sensors.powersaving_enabled = true;
+    } else {
+      sensors.powersaving_enabled = false;
+    }
+
     sensors.setSettingValue("gps", _prefs.gps_enabled?"1":"0");
   }
 #endif
@@ -226,8 +234,54 @@ public:
   void saveIdentity(const mesh::LocalIdentity& new_id) override;
   void clearStats() override;
 
-  void handleCommand(uint32_t sender_timestamp, char* command, char* reply);
+  // Outpath PR
+  void handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char* command, char* reply);
   void loop();
+  void scriptHandleCommand(const char* arg, char* reply, ClientInfo* sender = nullptr);
+
+  // Dump/load a config object as JSON to/from an arbitrary Stream, used by
+  // the sketch's "get config"/"put config [filter|report]" serial commands.
+  // Bypasses the fixed-size reply[] buffer, and routes each target to the
+  // object that already owns its own saveSerial()/loadSerial() — CommonCLI
+  // for prefs, ChannelFilter/ScriptRulesSerializer directly for the rest,
+  // so those subsystems stay fully decoupled from CommonCLI.
+  bool dumpConfigToStream(Stream& s, ConfigTarget target) {
+    switch (target) {
+      case CFG_PREFS:  return _cli.dumpConfigToStream(s);
+#ifdef WITH_CHANNEL_FILTER
+      case CFG_FILTER: return _filter.saveSerial(s);
+#endif
+#ifdef WITH_REPORT_ENGINE
+      case CFG_REPORT: {
+        ScriptRulesSerializer rs(_scriptRuleCount, _scriptRules, _bootConfig);
+        return rs.saveSerial(s);
+      }
+#endif
+    }
+    return false;
+  }
+
+  bool loadConfigFromStream(Stream& s, ConfigTarget target) {
+    switch (target) {
+      case CFG_PREFS: {
+        bool ok = _cli.loadConfigFromStream(s);
+        if (ok) savePrefs();   // persist to flash, same as any other successful "set"
+        return ok;
+      }
+#ifdef WITH_CHANNEL_FILTER
+      case CFG_FILTER: return _filter.loadSerial(s);
+#endif
+#ifdef WITH_REPORT_ENGINE
+      case CFG_REPORT: {
+        ScriptRulesSerializer rs(_scriptRuleCount, _scriptRules, _bootConfig);
+        bool ok = rs.loadSerial(s);
+        if (ok) _scriptRulesDirty = true;   // debounced write-out, handled on nRF52 elsewhere
+        return ok;
+      }
+#endif
+    }
+    return false;
+  }
 
 #if defined(WITH_BRIDGE)
   void setBridgeState(bool enable) override {
@@ -236,7 +290,7 @@ public:
     {
       bridge.begin();
     }
-    else 
+    else
     {
       bridge.end();
     }

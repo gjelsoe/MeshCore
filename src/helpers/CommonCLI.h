@@ -8,6 +8,7 @@
 #include <helpers/ConfigSerializer.h>
 #include <helpers/CommonRadioPrefs.h>
 #include <helpers/DynamicConfigSerializer.h>
+#include <helpers/radiolib/RXPowerSaving.h>
 
 #if defined(WITH_RS232_BRIDGE) || defined(WITH_ESPNOW_BRIDGE)
 #define WITH_BRIDGE
@@ -76,6 +77,7 @@ public:
   uint8_t loop_detect = 0;
   uint8_t cad_enabled = 0;      // hardware Channel Activity Detection before TX (boolean)
   uint8_t extra_sf[4];
+  RxPowerSavingConfig rxps;
 
 private:
   class RadioPrefs : public CommonRadioPrefs {
@@ -316,6 +318,7 @@ class CommonCLI {
   mesh::RTCClock* _rtc;
   NodePrefs* _prefs;
   CommonCLICallbacks* _callbacks;
+  RxPowerSavingControl* _rxps_control;
   mesh::MainBoard* _board;
   SensorManager* _sensors;
   RegionMap* _region_map;
@@ -331,11 +334,20 @@ class CommonCLI {
   void handleSetCmd(uint32_t sender_timestamp, char* command, char* reply);
 
 public:
-  CommonCLI(mesh::MainBoard& board, mesh::RTCClock& rtc, SensorManager& sensors, RegionMap& region_map, ClientACL& acl, NodePrefs* prefs, CommonCLICallbacks* callbacks)
-      : _board(&board), _rtc(&rtc), _sensors(&sensors), _region_map(&region_map), _acl(&acl), _prefs(prefs), _callbacks(callbacks) { }
+  CommonCLI(mesh::MainBoard& board, mesh::RTCClock& rtc, SensorManager& sensors,
+            RegionMap& region_map, ClientACL& acl, NodePrefs* prefs,
+            CommonCLICallbacks* callbacks, RxPowerSavingControl* rxps_control = nullptr)
+      : _rtc(&rtc), _prefs(prefs), _callbacks(callbacks), _rxps_control(rxps_control),
+        _board(&board), _sensors(&sensors), _region_map(&region_map), _acl(&acl) { }
 
   void loadPrefs(FILESYSTEM* _fs);
   bool savePrefs(FILESYSTEM* _fs);
   void handleCommand(uint32_t sender_timestamp, char* command, char* reply);
   uint8_t buildAdvertData(uint8_t node_type, uint8_t* app_data);
+
+  // Dump/load the live in-memory prefs as JSON directly to/from an
+  // arbitrary Stream (used by the sketch's "get config"/"put config"
+  // serial commands, bypassing the fixed-size reply[] buffer).
+  bool dumpConfigToStream(Stream& s) { return _prefs->saveSerial(s); }
+  bool loadConfigFromStream(Stream& s) { return _prefs->loadSerial(s); }
 };
