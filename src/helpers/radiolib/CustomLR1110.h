@@ -60,13 +60,10 @@ class CustomLR1110 : public LR1110 {
     // Protected in the RadioLib base, so the RXPS layer reads it through here.
     uint32_t getTcxoDelay() const { return tcxoDelay; }
 
-    // Restores the LF clock configuration RadioLib's begin() installs. Arming
-    // the duty cycle switches it to RC + BUSY-release (required by Semtech for
-    // SetRxDutyCycle); without this the change would outlive RXPS being turned
-    // off, and it also alters what the BUSY pin means to isChipBusy().
+    // Keep LF RC: LF XOSC conflicts with RadioLib's IRQ2 on DIO11.
     int16_t restoreLfClock() {
       return configLfClock(
-          RADIOLIB_LR11X0_LF_BUSY_RELEASE_DISABLED | RADIOLIB_LR11X0_LF_CLK_XOSC);
+          RADIOLIB_LR11X0_LF_BUSY_RELEASE_DISABLED | RADIOLIB_LR11X0_LF_CLK_RC);
     }
 
     // effectiveRxPeriod reports the RX window actually programmed, which may be
