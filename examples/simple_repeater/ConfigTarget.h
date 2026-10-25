@@ -6,8 +6,12 @@
 // define WITH_CHANNEL_FILTER / WITH_REPORT_ENGINE when included).
 enum ConfigTarget {
   CFG_PREFS
+#ifdef WITH_CHANNEL_FILTER
   ,
   CFG_FILTER
+#endif
+#ifdef WITH_REPORT_ENGINE
   ,
   CFG_REPORT
+#endif
 };

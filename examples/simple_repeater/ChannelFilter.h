@@ -1,4 +1,5 @@
 #pragma once
+#define WITH_FILTER_ENGINE
 
 // NOTE: FILESYSTEM is defined by helpers/IdentityStore.h (platform-specific macro).
 // ConfigSerializer provides the JSON persistence base class.
