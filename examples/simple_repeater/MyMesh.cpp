@@ -973,6 +973,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
   _fs = fs;
   // load persisted prefs
   _cli.loadPrefs(_fs);
+  _cron.begin(&_cli, getRTCClock(), *_fs);
   acl.load(_fs, self_id);
   // TODO: key_store.begin();
   region_map.load(_fs);
@@ -1317,6 +1318,9 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char* 
     const char* arg = command + 6;
     while (*arg == ' ') arg++;
     scriptHandleCommand(arg, reply, sender);
+  } else if (strncmp(command, "cron", 4) == 0 && (command[4] == ' ' || command[4] == '\0')) {
+    const char* cron_args = (command[4] == ' ') ? command + 5 : "";
+    _cron.handleCommand(cron_args, reply, *_fs, sender);
   } else {
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
@@ -1328,6 +1332,7 @@ void MyMesh::loop() {
 #endif
 
   mesh::Mesh::loop();
+  _cron.loop();
 
   if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
     mesh::Packet *pkt = createSelfAdvert();

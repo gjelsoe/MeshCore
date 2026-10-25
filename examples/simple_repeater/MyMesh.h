@@ -39,6 +39,8 @@
 #include "ChannelFilter.h"
 #include "ReportEngine.h"
 #include "ConfigTarget.h"     // must be after any other using get/put config
+#include "CronManager.h"
+
 #ifdef WITH_BRIDGE
 extern AbstractBridge* bridge;
 #endif
@@ -103,6 +105,7 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   bool region_load_active;
   unsigned long dirty_contacts_expiry;
   ChannelFilter _filter;
+  CronManager _cron;
 #if MAX_NEIGHBOURS
   NeighbourInfo neighbours[MAX_NEIGHBOURS];
 #endif
