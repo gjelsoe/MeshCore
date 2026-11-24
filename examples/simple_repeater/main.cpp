@@ -28,7 +28,13 @@ static char ethernet_command[160];
 #endif
 
 // For power saving
-unsigned long POWERSAVING_FIRSTSLEEP_SECS = 300; // The first sleep (if enabled) from boot
+// For boards using HW USB CDC
+// The first sleep (if enabled) from boot
+#if defined(ESP_PLATFORM) && ARDUINO_USB_CDC_ON_BOOT == 1 && ARDUINO_USB_MODE == 1
+unsigned long POWERSAVING_FIRSTSLEEP_SECS = 10;
+#else
+unsigned long POWERSAVING_FIRSTSLEEP_SECS = 300;
+#endif
 
 #if defined(PIN_USER_BTN) && defined(_SEEED_SENSECAP_SOLAR_H_)
 static unsigned long userBtnDownAt = 0;
@@ -165,7 +171,7 @@ void loop() {
     reply[0] = 0;
 #ifdef ETHERNET_ENABLED
     if (!ethernet_handle_command(command, reply)) {
-      the_mesh.handleCommand(0, command, reply);
+      the_mesh.handleCommand(0, NULL, command, reply);
     }
 #else
     the_mesh.handleCommand(0, NULL, command, reply);  // NOTE: there is no sender_timestamp via serial!
@@ -185,7 +191,7 @@ void loop() {
     char reply[160];
     reply[0] = 0;
     if (!ethernet_handle_command(ethernet_command, reply)) {
-      the_mesh.handleCommand(0, ethernet_command, reply);
+      the_mesh.handleCommand(0, NULL, ethernet_command, reply);
     }
     ethernet_send_reply(reply);
     ethernet_command[0] = 0;
@@ -222,7 +228,7 @@ void loop() {
     board.sleep(0); // nrf ignores seconds param, sleeps whenever possible
 #else
     if (the_mesh.millisHasNowPassed(POWERSAVING_FIRSTSLEEP_SECS * 1000)) { // To check if it is time to sleep
-      board.sleep(30); // Sleep. Wake up after a while or when receiving a LoRa packet
+      board.sleep(1); // Sleep. Wake up after a while or when receiving a LoRa packet
     }
 #endif
   }

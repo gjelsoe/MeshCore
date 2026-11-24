@@ -734,6 +734,37 @@ err=<RadioLib error>,fail=<count>[,erx=<us>,eslp=<us>]
 
 ---
 
+#### View or set the reply path override for the current remote client
+**Usage:**
+- `get outpath`
+- `get outpath path`
+- `set outpath <hop1_hex,hop2_hex,...>`
+- `set outpath path`
+- `set outpath direct`
+- `set outpath clear`
+- `set outpath flood`
+
+**Parameters:**
+- `hopN_hex`: Hop hash, `2`, `4`, or `6` hex characters. All hops must use the same width.
+
+**Notes:**
+- These commands require remote client context (they target the caller's ACL entry).
+- `get outpath path` reports the reciprocal `PAYLOAD_TYPE_PATH` received after
+  the caller's latest flood login without changing the selected output route.
+  Because that packet is asynchronous, an immediate query can report
+  `> path pending`; retry shortly. The observation window expires after one
+  minute, and the captured login path is not automatically selected.
+- `set outpath path` copies that observed path to the selected output route. It
+  returns an error if no path has been received since the caller's latest login.
+- The path hash size is inferred from the hop hash width.
+- A configured hop list replaces the stored direct reply route used for that caller.
+- `direct` sets a zero-hop direct route for a caller reachable without repeaters.
+- `clear` forgets the current direct path, replies `> outpath cleared`, and
+  allows normal path discovery to repopulate it.
+- `flood` forces replies to use flood packets until the client logs in again.
+
+---
+
 #### [Experimental] View or change the processing delay for received traffic
 **Usage:**
 - `get rxdelay`
@@ -1413,7 +1444,7 @@ Ethernet support is available on RAK4631 boards with a RAK13800 (W5100S) Etherne
 
 Repeater, Room Server, Sensor and Companion. SX1262 and LR1110 receive in a duty cycle; LR1121, LR2021 and SX127x stay in continuous RX (`supported=no`).
 
-- `get radio.rxps`: `desired` (saved on/off), `effective` (`armed` or `continuous`), `supported`, `err` (last error), `fail` (arm failures), `level`, `catch` (preamble symbols still caught), `preamble`, `rx`/`sleep` (µs). `erx`/`eslp` appear when the driver had to clamp the periods.
+- `get radio.rxps`: `desired` (saved on/off), `effective` (`armed` or `continuous`), `supported`, `err` (last error), `fail` (arm failures), `level`, `catch` (preamble symbols still caught), `preamble`, `rx`/`sleep` (µs). `erx`/`eslp` appear when the driver changed the periods: LR1110 extends `rx` to meet its timer, and SX1262 adjusts `rx` for its measured post-preamble timer, so they are usually present there.
 - `set radio.rxps off|on|conservative|balanced|max|overdrive|riskyWorkingMax`: `on` = `conservative` = level 3; `balanced` = level 6; `max` = level 8; `overdrive` (9) and `riskyWorkingMax` (10) run outside the datasheet timing rule.
 - `set radio.rxps level <1-10> [preamble <16|32>]`, `set radio.rxps max|overdrive|riskyWorkingMax preamble <16|32>`
 - `set radio.rxps <rx_us> <sleep_us>`: manual periods, 1000–30000000 µs, kept across SF/BW changes.
