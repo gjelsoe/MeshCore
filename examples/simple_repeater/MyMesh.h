@@ -36,9 +36,7 @@
 #include <helpers/RegionMap.h>
 #include <helpers/RoutingPolicy.h>
 #include "RateLimiter.h"
-#if defined(REPORT_ENGINE)
 #include "ReportEngine.h"
-#endif
 
 // PowerSaving variant
 #include "helpers/PowerSaving.h"
@@ -132,7 +130,7 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 
   File openAppend(const char* fname);
   bool isLooped(const mesh::Packet* packet, const uint8_t max_counters[]);
-#if defined(REPORT_ENGINE)
+
   // ── Report engine ─────────────────────────────────────────────────────────
   ScriptRule    _scriptRules[MAX_SCRIPT_RULES];
   uint8_t       _scriptRuleCount  = 0;
@@ -140,13 +138,16 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   bool          _scriptRulesDirty = false;
   BootConfig    _bootConfig       = {};
   unsigned long _nextBootMsg      = 0;
+#ifdef WITH_POWERGRADUS
+  bool          _batt_fwd_report  = false;  // report on battery fwd state changes
+  bool          _batt_fwd_last    = false;  // last known batt_fwd_suspended state
+#endif
 
   void _scriptLoad();
   void _scriptSave();
   void _scriptSendMessage(const ScriptRule& rule, const char* text);
   void _scriptSendBootMessage();
   void _scriptEvaluate();
-#endif
 
 protected:
   float getAirtimeBudgetFactor() const override {

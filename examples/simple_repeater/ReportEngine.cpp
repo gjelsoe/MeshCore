@@ -1,4 +1,4 @@
-#if defined(REPORT_ENGINE)
+
 // ReportEngine.cpp
 //
 // Implements load/save, CLI parser and evaluation of script rules.
@@ -31,7 +31,11 @@ void MyMesh::_scriptLoad() {
   File f = _fs->open(SCRIPT_RULES_FILE_JSON);
 #endif
   if (f) {
+#ifdef WITH_POWERGRADUS
+    ScriptRulesSerializer ser(_scriptRuleCount, _scriptRules, _bootConfig, _batt_fwd_report);
+#else
     ScriptRulesSerializer ser(_scriptRuleCount, _scriptRules, _bootConfig);
+#endif
     ser.loadSerial(f);
     f.close();
     if (_scriptRuleCount > MAX_SCRIPT_RULES) _scriptRuleCount = MAX_SCRIPT_RULES;
@@ -75,7 +79,11 @@ void MyMesh::_scriptSave() {
     MESH_DEBUG_PRINTLN("ScriptEngine: ERROR saving rules");
     return;
   }
+#ifdef WITH_POWERGRADUS
+  ScriptRulesSerializer ser(_scriptRuleCount, _scriptRules, _bootConfig, _batt_fwd_report);
+#else
   ScriptRulesSerializer ser(_scriptRuleCount, _scriptRules, _bootConfig);
+#endif
   ser.saveSerial(f);
   f.close();
   // Remove old binary file if present (one-time migration cleanup)
@@ -335,6 +343,29 @@ void MyMesh::_scriptEvaluate() {
     // last_fired is not persisted to SPIFFS on every fire — it resets on reboot.
     // Worst case: one extra message sent after an unexpected reboot, which is acceptable.
   }
+
+#ifdef WITH_POWERGRADUS
+  // Check if battery forwarding state has changed since last eval
+  if (_batt_fwd_report && _bootConfig.enabled && _bootConfig.chan_name[0] != 0) {
+    bool cur = batt_fwd_suspended;
+    if (cur != _batt_fwd_last) {
+      _batt_fwd_last = cur;
+      char msg[64];
+      uint16_t mv = board.getBattMilliVolts();
+      if (cur) {
+        snprintf(msg, sizeof(msg), "%s: Bat fwd SUSPENDED (%umV)", _prefs.node_name, (unsigned)mv);
+      } else {
+        snprintf(msg, sizeof(msg), "%s: Bat fwd RESUMED (%umV)", _prefs.node_name, (unsigned)mv);
+      }
+      ScriptRule tmp = {};
+      tmp.chan_type = _bootConfig.chan_type;
+      memcpy(tmp.chan_name,   _bootConfig.chan_name,   sizeof(tmp.chan_name));
+      memcpy(tmp.scope_name, _bootConfig.scope_name,  sizeof(tmp.scope_name));
+      tmp.zero_hop = _bootConfig.zero_hop;
+      _scriptSendMessage(tmp, msg);
+    }
+  }
+#endif
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -817,6 +848,26 @@ void MyMesh::scriptHandleCommand(const char *arg, char *reply, ClientInfo *sende
   }
 
   // ── Unknown sub-command ───────────────────────────────────────────────────
-  strcpy(reply, "Err - usage: report <add|list|del|clear|test|enable|disable|boot>");
-}
+#ifdef WITH_POWERGRADUS
+  if (strncmp(arg, "batt_fwd", 8) == 0 && (arg[8] == 0 || arg[8] == ' ')) {
+    const char* sub = arg + 8;
+    while (*sub == ' ') sub++;
+    if (strcmp(sub, "on") == 0) {
+      _batt_fwd_report = true;
+      _batt_fwd_last = batt_fwd_suspended;
+      _scriptRulesDirty = true;
+      strcpy(reply, "OK - battery fwd reporting on");
+    } else if (strcmp(sub, "off") == 0) {
+      _batt_fwd_report = false;
+      _scriptRulesDirty = true;
+      strcpy(reply, "OK - battery fwd reporting off");
+    } else if (*sub == 0) {
+      snprintf(reply, 160, "batt_fwd report: %s", _batt_fwd_report ? "on" : "off");
+    } else {
+      strcpy(reply, "Err - usage: report batt_fwd <on|off>");
+    }
+    return;
+  }
 #endif
+    strcpy(reply, "Err - usage: report <add|list|del|clear|test|enable|disable|boot>");
+}

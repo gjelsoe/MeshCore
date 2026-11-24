@@ -909,6 +909,11 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   next_local_advert = next_flood_advert = 0;
   dirty_contacts_expiry = 0;
   set_radio_at = revert_radio_at = 0;
+#ifdef WITH_POWERGRADUS
+  batt_fwd_suspended = false;
+  batt_fwd_count = 0;
+  next_batt_check = 0;
+#endif
   _logging = false;
   region_load_active = false;
   recv_pkt_region = NULL;
@@ -1480,6 +1485,12 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char *
         }
       }
     }
+  } else if (memcmp(command, "battery", 7) == 0 && (command[7] == 0 || command[7] == ' ')) {
+#ifdef WITH_POWERGRADUS
+    handleBatteryCmd(&command[7], reply);
+#else
+    strcpy(reply, "Err - battery control not compiled in (WITH_POWERGRADUS)");
+#endif
   } else if (memcmp(command, "discover.neighbors", 18) == 0) {
     const char* sub = command + 18;
     while (*sub == ' ') sub++;
@@ -1497,6 +1508,113 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, ClientInfo* sender, char *
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
 }
+
+
+#ifdef WITH_POWERGRADUS
+
+#ifndef BATT_FWD_CHECK_INTERVAL_MS
+  #define BATT_FWD_CHECK_INTERVAL_MS  30000   // how often battery is sampled
+#endif
+#ifndef BATT_FWD_CONFIRM_COUNT
+  #define BATT_FWD_CONFIRM_COUNT      3       // consecutive readings needed before switching state
+#endif
+#define BATT_FWD_MIN_MV   1000
+#define BATT_FWD_MAX_MV   30000
+
+void MyMesh::checkBattForwarding() {
+  if (!isBattFwdEnabled()) {
+    batt_fwd_suspended = false;
+    batt_fwd_count = 0;
+    return;
+  }
+
+  uint16_t mv = board.getBattMilliVolts();
+  if (mv == 0) {   // no valid reading — never suspend on that
+    batt_fwd_count = 0;
+    return;
+  }
+
+  bool want_change = batt_fwd_suspended ? (mv >= _prefs.batt_fwd_resume_mv)
+                                        : (mv <  _prefs.batt_fwd_suspend_mv);
+  if (!want_change) {
+    batt_fwd_count = 0;
+    return;
+  }
+  if (++batt_fwd_count < BATT_FWD_CONFIRM_COUNT) return;
+
+  batt_fwd_count = 0;
+  bool was_suspended = batt_fwd_suspended;
+  batt_fwd_suspended = !batt_fwd_suspended;
+  MESH_DEBUG_PRINTLN("Battery %u mV: forwarding %s", (unsigned)mv, batt_fwd_suspended ? "SUSPENDED" : "RESUMED");
+
+  // Report engine polls batt_fwd_suspended in _scriptEvaluate() and sends
+  // the state-change message via the boot channel when batt_fwd reporting is on.
+}
+
+void MyMesh::handleBatteryCmd(const char* args, char* reply) {
+  while (*args == ' ') args++;
+
+  if (*args == 0) {   // 'battery' -> status
+    uint16_t mv = board.getBattMilliVolts();
+    if (!isBattFwdEnabled()) {
+      sprintf(reply, "batt:%u mV, fwd control: off", (unsigned)mv);
+    } else {
+      sprintf(reply, "batt:%u mV, fwd:%s (suspend <%u, resume >=%u mV)%s",
+              (unsigned)mv,
+              batt_fwd_suspended ? "SUSPENDED" : "on",
+              (unsigned)_prefs.batt_fwd_suspend_mv,
+              (unsigned)_prefs.batt_fwd_resume_mv,
+              _prefs.disable_fwd ? ", repeat off" : "");
+    }
+    return;
+  }
+
+  if (strcmp(args, "off") == 0) {
+    _prefs.batt_fwd_suspend_mv = 0;
+    _prefs.batt_fwd_resume_mv = 0;
+    batt_fwd_suspended = false;
+    batt_fwd_count = 0;
+    savePrefs();
+    strcpy(reply, "OK - battery fwd control off");
+    return;
+  }
+
+  // 'battery <suspend-mV> <resume-mV>'
+  char* ep;
+  long susp = strtol(args, &ep, 10);
+  bool ok = ep != args && *ep == ' ';
+  const char* sp = ep;
+  long res = ok ? strtol(sp, &ep, 10) : 0;
+  ok = ok && ep != sp;
+  while (ok && *ep == ' ') ep++;
+  if (!ok || *ep != 0) {
+    strcpy(reply, "Err - usage: battery [off | <suspend-mV> <resume-mV>]");
+    return;
+  }
+  if (susp < BATT_FWD_MIN_MV || res > BATT_FWD_MAX_MV) {
+    sprintf(reply, "Err - range %d-%d mV", BATT_FWD_MIN_MV, BATT_FWD_MAX_MV);
+    return;
+  }
+  if (res <= susp) {
+    strcpy(reply, "Err - resume-mV must be > suspend-mV");
+    return;
+  }
+
+  _prefs.batt_fwd_suspend_mv = (uint16_t)susp;
+  _prefs.batt_fwd_resume_mv  = (uint16_t)res;
+  savePrefs();
+
+  uint16_t mv = board.getBattMilliVolts();
+  batt_fwd_count = 0;
+  batt_fwd_suspended = (mv > 0 && mv < _prefs.batt_fwd_suspend_mv);
+  next_batt_check = futureMillis(BATT_FWD_CHECK_INTERVAL_MS);
+
+  sprintf(reply, "OK - suspend <%u, resume >=%u mV (now %u mV, fwd:%s)",
+          (unsigned)_prefs.batt_fwd_suspend_mv, (unsigned)_prefs.batt_fwd_resume_mv,
+          (unsigned)mv, batt_fwd_suspended ? "SUSPENDED" : "on");
+}
+
+#endif  // WITH_POWERGRADUS
 
 void MyMesh::loop() {
 #ifdef WITH_BRIDGE
@@ -1534,6 +1652,13 @@ void MyMesh::loop() {
     _prefs.getRadioPrefs()->applyRxPowerSaving(_prefs.sf, _prefs.bw);
     MESH_DEBUG_PRINTLN("Radio params restored");
   }
+
+#ifdef WITH_POWERGRADUS
+  if (millisHasNowPassed(next_batt_check)) {
+    next_batt_check = futureMillis(BATT_FWD_CHECK_INTERVAL_MS);
+    checkBattForwarding();
+  }
+#endif
 
   // is pending dirty contacts write needed?
   if (dirty_contacts_expiry && millisHasNowPassed(dirty_contacts_expiry)) {

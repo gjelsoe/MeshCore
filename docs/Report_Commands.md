@@ -387,6 +387,57 @@ report boot set @hash:alertchan "{reason}"
 
 ---
 
+## Battery Forwarding State Reporting (`WITH_POWERGRADUS`)
+
+> **Note:** This feature is only available when the firmware is compiled with the `WITH_POWERGRADUS` define. The `report batt_fwd` commands are not present in standard builds.
+
+When compiled with `WITH_POWERGRADUS`, the report engine can monitor the battery forwarding state and automatically send a message whenever it changes — i.e. when packet forwarding is suspended or resumed due to low battery.
+
+The message is sent on the boot channel (`report boot set` must be configured). No separate channel is configured for this feature.
+
+### `report batt_fwd on`
+
+Enables battery forwarding state reporting. When enabled, a message is sent each time the state changes:
+
+```
+DK-REP-01: Bat fwd SUSPENDED (3312mV)
+DK-REP-01: Bat fwd RESUMED (3851mV)
+```
+
+The current state is sampled at the moment reporting is enabled, to avoid a false trigger on the next evaluation cycle.
+
+### `report batt_fwd off`
+
+Disables battery forwarding state reporting.
+
+### `report batt_fwd`
+
+Shows whether battery forwarding state reporting is currently enabled:
+
+```
+batt_fwd report: on
+batt_fwd report: off
+```
+
+### Persistence
+
+The `batt_fwd` on/off setting is persisted in `/report_rules.json` along with the other rules and boot config. It survives reboots.
+
+### Example
+
+```
+# Enable battery forwarding state reporting
+report batt_fwd on
+
+# Check current state
+report batt_fwd
+
+# Disable
+report batt_fwd off
+```
+
+---
+
 ## Channel Type Summary
 
 | Token | Type | Description |

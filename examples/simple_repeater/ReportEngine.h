@@ -114,20 +114,34 @@ public:
 class ScriptRulesSerializer : public ConfigSerializer {
   ScriptRuleSerializer _rs[MAX_SCRIPT_RULES];
   BootConfigSerializer _bcs;
+#ifdef WITH_POWERGRADUS
+  bool &_bfr;
+#endif
 
 public:
   uint8_t &count;
   ScriptRule *rules;
 
+#ifdef WITH_POWERGRADUS
+  ScriptRulesSerializer(uint8_t &cnt, ScriptRule *r, BootConfig &boot, bool &bfr)
+      : count(cnt), rules(r), _bcs(boot), _bfr(bfr),
+        _rs{ ScriptRuleSerializer(r[0]), ScriptRuleSerializer(r[1]), ScriptRuleSerializer(r[2]),
+             ScriptRuleSerializer(r[3]), ScriptRuleSerializer(r[4]), ScriptRuleSerializer(r[5]),
+             ScriptRuleSerializer(r[6]), ScriptRuleSerializer(r[7]) } {}
+#else
   ScriptRulesSerializer(uint8_t &cnt, ScriptRule *r, BootConfig &boot)
       : count(cnt), rules(r), _bcs(boot),
         _rs{ ScriptRuleSerializer(r[0]), ScriptRuleSerializer(r[1]), ScriptRuleSerializer(r[2]),
              ScriptRuleSerializer(r[3]), ScriptRuleSerializer(r[4]), ScriptRuleSerializer(r[5]),
              ScriptRuleSerializer(r[6]), ScriptRuleSerializer(r[7]) } {}
+#endif
 
   void structure() override {
     def("cnt", count);
     def("boot", _bcs);
+#ifdef WITH_POWERGRADUS
+    def("bfr", _bfr);
+#endif
 
     char _rkey[4]; // "r0".."r7" — reused across calls
 
